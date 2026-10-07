@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "auto-trade-cycling",
+  "version": "${version}",
+  "name": "Auto Trade Cycling",
+  "description": "Liuyue's mod",
+  "authors": [],
+  "contact": {},
+  "license": "LGPL-3.0",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.liuyue.autoTradeCycling.AutoTradeCyclingMod"
+    ],
+    "client": [
+      "com.liuyue.autoTradeCycling.client.AutoTradeCyclingClient"
+    ]
+  },
+  "mixins": [
+    "auto-trade-cycling.mixins.json",
+    {
+      "config": "auto-trade-cycling.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}",
+    "trade_cycling": "*",
+    "visibletraders": "*",
+    "owo": "*"
+  }
+}

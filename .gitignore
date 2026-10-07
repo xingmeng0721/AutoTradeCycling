@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Loom 运行目录
+run/
+.loom-cache/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 第三方参考源码（各自可用 git clone 重新获得，避免嵌套仓库）
+owo-lib/

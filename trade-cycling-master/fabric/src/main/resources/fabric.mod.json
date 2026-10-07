@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "trade_cycling",
+  "version": "${mod_version}",
+  "name": "Trade Cycling",
+  "description": "The trade cycling functionality from Easy Villagers.",
+  "authors": [
+    "Max Henkel"
+  ],
+  "contact": {
+    "homepage": "https://www.curseforge.com/minecraft/mc-mods/trade-cycling",
+    "issues": "https://github.com/henkelmax/trade-cycling/issues",
+    "sources": "https://github.com/henkelmax/trade-cycling",
+    "email": "info@modrepo.de"
+  },
+  "license": "All Rights Reserved",
+  "icon": "icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "de.maxhenkel.tradecycling.FabricTradeCyclingMod"
+    ],
+    "client": [
+      "de.maxhenkel.tradecycling.FabricTradeCyclingClientMod"
+    ]
+  },
+  "mixins": [
+    "trade_cycling.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": "${fabric_loader_dependency}",
+    "minecraft": "${minecraft_dependency}"
+  },
+  "breaks": {
+    "easy_villagers": "*",
+    "fabric-api": "${fabric_api_dependency_breaks}"
+  },
+  "suggests": {
+    "visibletraders": ">=2.2.0"
+  }
+}
