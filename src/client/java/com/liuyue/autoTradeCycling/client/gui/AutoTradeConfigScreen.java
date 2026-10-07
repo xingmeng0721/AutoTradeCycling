@@ -297,7 +297,9 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             this.itemSearchText = text;
             rebuildItemList();
         });
-        panel.child(searchBox);
+        FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
+        searchRow.child(searchBox);
+        panel.child(searchRow);
 
         itemListFlow = Containers.verticalFlow(Sizing.fill(100), Sizing.content());
         itemListFlow.gap(2);
@@ -340,7 +342,9 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             this.itemEnchSearchText = text;
             refreshItemEnchList();
         });
-        panel.child(searchBox);
+        FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
+        searchRow.child(searchBox);
+        panel.child(searchRow);
 
         panel.child(Components.label(Component.literal("§7点击附魔展开等级选择")).color(DIM));
 
@@ -595,21 +599,23 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             }
         }
 
-        // 切换展开状态
+        // 切换展开状态：就地更新受影响的两行，不重建整表
+        // （clearChildren() 会让列表内容高度瞬间归零，滚动位置会被 clamp 回顶部）
+        Map<ResourceLocation, EnchRow> rows = forItem ? itemEnchRows : bookRows;
+        ResourceLocation previous = forItem ? expandedItemEnchant : expandedBookEnchant;
+        ResourceLocation now = option.id().equals(previous) ? null : option.id();
+
         if (forItem) {
-            if (option.id().equals(expandedItemEnchant)) {
-                expandedItemEnchant = null; // 收起
-            } else {
-                expandedItemEnchant = option.id(); // 展开这个，收起其他
-            }
-            refreshItemEnchList();
+            expandedItemEnchant = now;
         } else {
-            if (option.id().equals(expandedBookEnchant)) {
-                expandedBookEnchant = null;
-            } else {
-                expandedBookEnchant = option.id();
-            }
-            rebuildBookList();
+            expandedBookEnchant = now;
+        }
+
+        if (previous != null && !previous.equals(now)) {
+            paintEnchRowButton(rows, previous);
+        }
+        if (now != null) {
+            paintEnchRowButton(rows, now);
         }
     }
 
@@ -644,15 +650,29 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         boolean added = rows == itemEnchRows
                 ? hasEnchantOnItem(selectedItemId, id)
                 : AutoTradeManager.getInstance().findBookTarget(id) != null;
-        boolean expanded = rows == itemEnchRows
-                ? id.equals(expandedItemEnchant)
-                : id.equals(expandedBookEnchant);
 
         Color bg = added ? (hovered ? ROW_ADDED_HOVER : ROW_ADDED)
                 : (hovered ? ROW_HOVER : ROW_BG);
         row.row.surface(roundedSurface(bg));
         row.name.color(added ? ACTION : (hovered ? TEXT : DIM));
-        
+
+        paintEnchRowButton(rows, id);
+    }
+
+    /**
+     * 只刷新一条附魔行的按钮与等级选择器，不触碰底色/悬停状态。
+     * 供展开/收起时就地更新，避免整表重建导致滚动位置回弹。
+     */
+    private void paintEnchRowButton(Map<ResourceLocation, EnchRow> rows, ResourceLocation id) {
+        EnchRow row = rows.get(id);
+        if (row == null) return;
+        boolean added = rows == itemEnchRows
+                ? hasEnchantOnItem(selectedItemId, id)
+                : AutoTradeManager.getInstance().findBookTarget(id) != null;
+        boolean expanded = rows == itemEnchRows
+                ? id.equals(expandedItemEnchant)
+                : id.equals(expandedBookEnchant);
+
         if (added) {
             row.button.setMessage(Component.literal("§a✓"));
             row.button.tooltip(Component.literal("已加入，点击移除"));
@@ -663,7 +683,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             row.button.setMessage(Component.literal("§b＋"));
             row.button.tooltip(Component.literal("点击展开等级选择"));
         }
-        
+
         // 控制等级选择器可见性
         row.levelPicker.sizing(Sizing.fill(100), expanded ? Sizing.content() : Sizing.fixed(0));
     }
@@ -690,7 +710,9 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             this.bookEnchSearchText = text;
             rebuildBookList();
         });
-        panel.child(searchBox);
+        FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
+        searchRow.child(searchBox);
+        panel.child(searchRow);
 
         panel.child(Components.label(
                 Component.literal("§7每个附魔一条目标，点击展开等级选择")).color(DIM));
