@@ -31,10 +31,12 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 服务端批量搜索：在收到请求后连续重掷村民交易，直到命中或达到上限。
+ * 服务端批量搜索：在收到请求后连续重掷村民交易，直到命中目标或玩家手动停止
+ * （关闭交易界面 / 打开配置界面都会关闭容器，搜索随之结束）。
  * 相比"客户端每刷新一次发一个包"，省掉了每次的网络往返，是主要提速来源。
  *
- * <p>重掷分 tick 进行（每 tick {@link #ATTEMPTS_PER_TICK} 次），避免一次性长时间占用主线程。
+ * <p>重掷分 tick 进行（每 tick 最多 {@link #MAX_ATTEMPTS_PER_TICK} 次、且不超过
+ * {@link #TICK_TIME_BUDGET_NANOS} 的时间预算），避免一次性长时间占用主线程。
  * 村民的准入条件与 Trade Cycling 保持一致，保证结果合法：必须在交易界面里、
  * 是未交易过的村民、且已绑定工作站。
  */
@@ -47,8 +49,6 @@ public final class ServerSearchHandler {
     private static final long TICK_TIME_BUDGET_NANOS = 10_000_000L;
     /** 每 tick 的硬上限，防止极快的机器上单次请求把 tick 拉长。 */
     private static final int MAX_ATTEMPTS_PER_TICK = 400;
-    /** 单次请求的总尝试上限。 */
-    private static final int MAX_TOTAL_ATTEMPTS = 20000;
     /** 每隔多少 tick 回传一次进度，让客户端能看到刷新计数在涨。 */
     private static final int PROGRESS_INTERVAL_TICKS = 20;
 
@@ -95,14 +95,12 @@ public final class ServerSearchHandler {
             return;
         }
 
-        int maxAttempts = Math.max(1, Math.min(payload.maxAttempts(), MAX_TOTAL_ATTEMPTS));
-
         // 记一笔本轮的候选人报价，便于事后排查（装了 VT 时这里是含 2-5 级的合并列表）
         MerchantOffers visible = candidateOffers(villager);
         LOGGER.info("批量搜索开始: 候选人报价 {} 条 ({})", visible.size(), describeOffers(visible));
 
         ACTIVE.put(player.getUUID(), new Search(player, villager, villagerAccessor, menu,
-                menuAccessor.getTradeContainer(), targets, payload.matchAny(), maxAttempts));
+                menuAccessor.getTradeContainer(), targets, payload.matchAny()));
     }
 
     /** 取前若干条报价的结果物品，用于诊断输出。 */
@@ -145,11 +143,10 @@ public final class ServerSearchHandler {
         }
     }
 
-    /** 推进一轮，返回 true 表示搜索已结束。 */
+    /** 推进一轮，返回 true 表示搜索已结束（命中目标）。 */
     private static boolean step(Search search) {
-        int budget = Math.min(MAX_ATTEMPTS_PER_TICK, search.maxAttempts - search.attempts);
         long deadline = System.nanoTime() + TICK_TIME_BUDGET_NANOS;
-        for (int i = 0; i < budget; i++) {
+        for (int i = 0; i < MAX_ATTEMPTS_PER_TICK; i++) {
             search.attempts++;
             reroll(search);
             List<Integer> matched = TradeTargets.matchIndices(candidateOffers(search.villager), search.targets);
@@ -158,10 +155,6 @@ public final class ServerSearchHandler {
                 return true;
             }
             if (System.nanoTime() >= deadline) break;
-        }
-        if (search.attempts >= search.maxAttempts) {
-            finish(search, List.of());
-            return true;
         }
         return false;
     }
@@ -183,7 +176,7 @@ public final class ServerSearchHandler {
         VisibleTradersServer.regenerateTrades(villager);
     }
 
-    /** 把最终报价同步给客户端，并回传搜索结果。 */
+    /** 命中后把最终报价同步给客户端，并回传搜索结果。 */
     private static void finish(Search search, List<Integer> matched) {
         Villager villager = search.villager;
         // 必须发合并列表：VT 只 hook 了 openTradingScreen，我们直接调 sendMerchantOffers 绕过了它
@@ -192,8 +185,7 @@ public final class ServerSearchHandler {
                 villager.showProgressBar(), villager.canRestock());
         search.menu.slotsChanged(search.container);
 
-        int status = matched.isEmpty() ? SearchResultPayload.STATUS_NOT_FOUND : SearchResultPayload.STATUS_FOUND;
-        reply(search.player, new SearchResultPayload(status, search.attempts, matched));
+        reply(search.player, new SearchResultPayload(SearchResultPayload.STATUS_FOUND, search.attempts, matched));
     }
 
     private static void reject(ServerPlayer player) {
@@ -213,12 +205,11 @@ public final class ServerSearchHandler {
         final MerchantContainer container;
         final List<TargetEntry> targets;
         final boolean matchAny;
-        final int maxAttempts;
         int attempts;
         int ticksSinceReport;
 
         Search(ServerPlayer player, Villager villager, VillagerAccessor villagerAccessor, MerchantMenu menu,
-               MerchantContainer container, List<TargetEntry> targets, boolean matchAny, int maxAttempts) {
+               MerchantContainer container, List<TargetEntry> targets, boolean matchAny) {
             this.player = player;
             this.villager = villager;
             this.villagerAccessor = villagerAccessor;
@@ -226,7 +217,6 @@ public final class ServerSearchHandler {
             this.container = container;
             this.targets = targets;
             this.matchAny = matchAny;
-            this.maxAttempts = maxAttempts;
         }
     }
 }

@@ -43,7 +43,7 @@ dependencies {
     modImplementation "maven.modrinth:qpPoAL6m:U95L1wcI"
     // Visible Traders 0.1.2.2 (1.21.10)，必需依赖：2-5 级交易只能从它那里拿到
     modImplementation "maven.modrinth:AhllI99f:jdFh3igV"
-    // owo-lib：UI 库。官方没有 1.21.10 构建，用 1.21.9 的（其 fabric.mod.json 声明 minecraft >=1.21.6）
+    // owo-lib：UI 库
     modImplementation "io.wispforest:owo-lib:0.12.24+1.21.9"
 }
 

@@ -17,12 +17,10 @@ public record SearchResultPayload(int status, int attempts, List<Integer> matche
 
     /** 找到目标。 */
     public static final int STATUS_FOUND = 0;
-    /** 达到上限仍未找到。 */
-    public static final int STATUS_NOT_FOUND = 1;
     /** 村民/界面状态不合法，未执行搜索。 */
-    public static final int STATUS_REJECTED = 2;
+    public static final int STATUS_REJECTED = 1;
     /** 搜索进行中的进度回传，搜索还会继续；matched 为空。 */
-    public static final int STATUS_PROGRESS = 3;
+    public static final int STATUS_PROGRESS = 2;
 
     public static final Type<SearchResultPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(AutoTradeCyclingMod.MOD_ID, "search_result"));

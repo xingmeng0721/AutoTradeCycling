@@ -46,6 +46,9 @@ public class AutoTradeCyclingClient implements ClientModInitializer {
         if (client == null) return;
         while (openConfigKey.consumeClick()) {
             if (!(client.screen instanceof AutoTradeConfigScreen)) {
+                // 打开配置界面会关闭交易容器，服务端那边的搜索随之结束。
+                // 这里同步把客户端状态也停掉，否则界面上的按钮会停留在"停止"。
+                AutoTradeManager.getInstance().cancel();
                 client.setScreen(new AutoTradeConfigScreen());
             }
         }

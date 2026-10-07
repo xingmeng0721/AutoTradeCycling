@@ -12,10 +12,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 客户端请求服务端批量重掷村民交易，直到命中目标或达到上限。
+ * 客户端请求服务端批量重掷村民交易，直到命中目标或玩家手动停止。
  * 服务端会分 tick 处理，避免一次卡服。
  */
-public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny, int maxAttempts)
+public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny)
         implements CustomPacketPayload {
 
     public static final Type<SearchTradesPayload> TYPE =
@@ -36,7 +36,6 @@ public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny, i
                 }
             }
             buf.writeBoolean(value.matchAny);
-            buf.writeVarInt(value.maxAttempts);
         }
 
         @Override
@@ -54,7 +53,7 @@ public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny, i
                 }
                 targets.add(new TargetEntry(id, enchants, minCount, maxPrice));
             }
-            return new SearchTradesPayload(targets, buf.readBoolean(), buf.readVarInt());
+            return new SearchTradesPayload(targets, buf.readBoolean());
         }
     };
 

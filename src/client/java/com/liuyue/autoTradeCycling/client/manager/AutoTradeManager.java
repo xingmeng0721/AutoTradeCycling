@@ -30,9 +30,8 @@ public class AutoTradeManager {
     public enum State { IDLE, WAITING_FOR_SCREEN, SEARCHING, CYCLING, CHECKING, DONE, PLAY_SOUND }
     public enum MatchMode { ALL, ANY }
 
-    /** 单次服务端批量搜索的最大尝试次数（服务端另有硬上限）。 */
-    private static final int SERVER_SEARCH_ATTEMPTS = 20000;
-    /** 等待服务端搜索结果的上限（tick），超时则放弃。 */
+    /** 服务端不再回传进度（或压根没响应）时的等待上限（tick），超时则放弃。
+     *  正常搜索会每 20 tick 回传一次进度，只要服务端还在刷就不会超时。 */
     private static final int SEARCH_TIMEOUT_TICKS = 600;
 
     private State state = State.IDLE;
@@ -98,6 +97,82 @@ public class AutoTradeManager {
     public void clearTargets() { targets.clear(); }
     public List<TargetEntry> getTargets() { return targets; }
 
+    /** 查找某个物品（非附魔书）的目标。 */
+    public TargetEntry findItemTarget(ResourceLocation itemId) {
+        for (TargetEntry t : targets) {
+            if (!t.isEnchantedBook() && t.id().equals(itemId)) return t;
+        }
+        return null;
+    }
+
+    /** 查找包含指定附魔的附魔书目标（本 mod 创建的附魔书目标每条只带一个附魔）。 */
+    public TargetEntry findBookTarget(ResourceLocation enchantId) {
+        for (TargetEntry t : targets) {
+            if (!t.isEnchantedBook()) continue;
+            for (EnchantRequirement req : t.enchants()) {
+                if (req.id().equals(enchantId)) return t;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 原地更新某条目标的数量/价格（保持列表顺序，不产生重复项）。
+     * {@link TargetEntry} 是不可变记录，只能整条替换；替换时复用原来的 enchants 列表实例，
+     * 界面上持有的旧引用仍能通过 {@link #sameEntry} 定位到新记录。
+     */
+    public boolean updateEntry(TargetEntry entry, int minCount, int maxPrice) {
+        for (int i = 0; i < targets.size(); i++) {
+            TargetEntry current = targets.get(i);
+            if (!sameEntry(current, entry)) continue;
+            if (current.minCount() == minCount && current.maxPrice() == maxPrice) return false;
+            targets.set(i, new TargetEntry(current.id(), current.enchants(), minCount, maxPrice));
+            return true;
+        }
+        return false;
+    }
+
+    /** 调整某条目标上一条附魔要求的等级（原地替换列表元素，不换列表实例）。 */
+    public boolean setEnchantLevel(TargetEntry entry, ResourceLocation enchantId, int minLevel) {
+        for (TargetEntry current : targets) {
+            if (!sameEntry(current, entry)) continue;
+            for (int i = 0; i < current.enchants().size(); i++) {
+                if (!current.enchants().get(i).id().equals(enchantId)) continue;
+                if (current.enchants().get(i).minLevel() == minLevel) return false;
+                current.enchants().set(i, new EnchantRequirement(enchantId, minLevel));
+                return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /** 从某条目标（物品或附魔书）上移除一条附魔要求。 */
+    public boolean removeEnchant(TargetEntry entry, ResourceLocation enchantId) {
+        for (TargetEntry current : targets) {
+            if (!sameEntry(current, entry)) continue;
+            return current.enchants().removeIf(req -> req.id().equals(enchantId));
+        }
+        return false;
+    }
+
+    /** 拿某条目标的最新记录；{@link #updateEntry} 等替换记录后旧引用会过期，用它重新定位。 */
+    public TargetEntry latest(TargetEntry entry) {
+        for (TargetEntry current : targets) {
+            if (sameEntry(current, entry)) return current;
+        }
+        return null;
+    }
+
+    /**
+     * 界面用来识别“同一条目标”：引用相等，或 id 相同且 enchants 列表是同一实例。
+     * 界面上的卡片在 {@link #updateEntry} 等替换记录后仍持有旧实例，
+     * 靠列表实例不变这一约定重新定位到最新记录。
+     */
+    private static boolean sameEntry(TargetEntry current, TargetEntry entry) {
+        return current == entry || (current.id().equals(entry.id()) && current.enchants() == entry.enchants());
+    }
+
     public void start() {
         if (targets.isEmpty()) return;
         excludeImpossibleTargets();
@@ -138,7 +213,12 @@ public class AutoTradeManager {
         return null;
     }
 
-    public void cancel() { this.state = State.IDLE; this.cycleCount = 0; }
+    public void cancel() {
+        boolean wasActive = isActive();
+        this.state = State.IDLE;
+        this.cycleCount = 0;
+        if (wasActive) chat(Minecraft.getInstance(), "§c已停止自动刷新。");
+    }
     public boolean isActive() { return state != State.IDLE && state != State.DONE; }
     public State getState() { return state; }
 
@@ -175,14 +255,15 @@ public class AutoTradeManager {
                 chat(client, "§a开始自动刷新（1级村民），目标: §e" + formatTargetNames());
                 tickCounter = 0;
 
-                // 服务端装了本 mod 时让它在服务端连续重掷，省掉逐轮网络往返。
+                // 服务端装了本 mod 时让它在服务端连续重掷，直到命中或玩家手动停止（关界面/开配置界面），
+                // 省掉逐轮网络往返。
                 // 装了 VT 也走这条路：服务端用 VT 的合并列表（1 级 + 2-5 级锁定交易）做匹配，
                 // 结束时也发同一份合并列表，与 VT 自己 hook openTradingScreen 的行为一致。
                 if (ClientPlayNetworking.canSend(SearchTradesPayload.TYPE)) {
-                    chat(client, "§7服务端支持批量搜索，正在刷新...");
+                    chat(client, "§7服务端支持批量搜索，正在刷新（找到目标前不会停，可用 G 键打开配置界面点停止）...");
                     state = State.SEARCHING;
                     ClientPlayNetworking.send(new SearchTradesPayload(new ArrayList<>(targets),
-                            matchMode == MatchMode.ANY, SERVER_SEARCH_ATTEMPTS));
+                            matchMode == MatchMode.ANY));
                 } else {
                     state = State.CYCLING;
                     doCycling();
@@ -197,7 +278,7 @@ public class AutoTradeManager {
             return;
         }
         if (tickCounter > SEARCH_TIMEOUT_TICKS) {
-            finish(client, "§e等待服务端搜索结果超时，可再次点击开始。");
+            finish(client, "§e服务端一直没有回传搜索进度，已停止。可再次点击开始。");
         }
     }
 
@@ -209,13 +290,13 @@ public class AutoTradeManager {
         cycleCount = payload.attempts();
 
         int status = payload.status();
-        if (status == SearchResultPayload.STATUS_PROGRESS) return;
-        if (status == SearchResultPayload.STATUS_REJECTED) {
-            finish(client, "§c服务端拒绝了搜索：请确认打开的是未交易过的 1 级村民的交易界面。");
+        if (status == SearchResultPayload.STATUS_PROGRESS) {
+            // 服务端还在刷，重置超时计时；搜索会一直进行到命中或玩家停止
+            tickCounter = 0;
             return;
         }
-        if (status == SearchResultPayload.STATUS_NOT_FOUND) {
-            finish(client, "§e已刷新 " + payload.attempts() + " 次仍未找到目标，可再次点击开始。");
+        if (status == SearchResultPayload.STATUS_REJECTED) {
+            finish(client, "§c服务端拒绝了搜索：请确认打开的是未交易过的 1 级村民的交易界面。");
             return;
         }
 
