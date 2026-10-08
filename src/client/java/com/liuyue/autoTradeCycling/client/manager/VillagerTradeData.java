@@ -5,6 +5,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.EnchantmentTags;
 import net.minecraft.tags.TagKey;
@@ -16,10 +17,16 @@ import net.minecraft.world.entity.npc.VillagerType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.item.alchemy.PotionBrewing;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.trading.MerchantOffer;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -28,6 +35,7 @@ import java.util.Set;
 public final class VillagerTradeData {
 
     private static Set<ResourceLocation> itemCache;
+    private static List<ResourceLocation> potionCache;
 
     private VillagerTradeData() {
     }
@@ -71,6 +79,42 @@ public final class VillagerTradeData {
         if (ids.size() < 10) return Set.of();
         itemCache = ids;
         return itemCache;
+    }
+
+    public static synchronized List<ResourceLocation> tradeablePotions() {
+        if (potionCache != null) return potionCache;
+
+        Minecraft client = Minecraft.getInstance();
+        if (client.level == null) return List.of();
+
+        PotionBrewing brewing = client.level.potionBrewing();
+        List<ResourceLocation> ids = new ArrayList<>();
+        for (Holder.Reference<Potion> holder : BuiltInRegistries.POTION.listElements().toList()) {
+            if (holder.value().getEffects().isEmpty()) continue;
+            if (!brewing.isBrewablePotion(holder)) continue;
+            ResourceLocation id = holder.key().location();
+            if (id.getPath().startsWith("long_")) continue;
+            ids.add(id);
+        }
+        if (ids.isEmpty()) return List.of();
+        ids.sort(Comparator.comparing(VillagerTradeData::potionSortKey));
+        potionCache = ids;
+        return potionCache;
+    }
+
+    private static String potionSortKey(ResourceLocation id) {
+        String path = id.getPath();
+        if (path.startsWith("strong_")) return path.substring(7) + "|1";
+        return path + "|0";
+    }
+
+    public static Component potionName(ResourceLocation potionId) {
+        Potion potion = BuiltInRegistries.POTION.getValue(potionId);
+        if (potion == null) return Component.literal(potionId.getPath());
+        Component base = new PotionContents(BuiltInRegistries.POTION.wrapAsHolder(potion))
+                .getName("item.minecraft.tipped_arrow.effect.");
+        if (potionId.getPath().startsWith("strong_")) return Component.literal("强效 ").append(base);
+        return base;
     }
 
     public static boolean enchantOnTradedEquipment(ResourceLocation enchantId) {
