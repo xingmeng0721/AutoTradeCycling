@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/** 收到服务端交易报价后通知 AutoTradeManager。 */
 @Mixin(ClientPacketListener.class)
 public class MerchantOfferListener {
     @Inject(method = "handleMerchantOffers", at = @At("TAIL"))

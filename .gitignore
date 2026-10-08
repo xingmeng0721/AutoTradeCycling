@@ -16,5 +16,7 @@ run/
 .DS_Store
 Thumbs.db
 
-# 第三方参考源码（各自可用 git clone 重新获得，避免嵌套仓库）
+# 第三方参考源码（协议不允许再分发，需自行 clone）
 owo-lib/
+trade-cycling-master/
+VisibleTraders-fabric/

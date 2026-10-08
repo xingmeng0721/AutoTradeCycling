@@ -3,6 +3,7 @@ package com.liuyue.autoTradeCycling.client.gui;
 import com.liuyue.autoTradeCycling.client.manager.AutoTradeManager;
 import com.liuyue.autoTradeCycling.client.manager.AutoTradeManager.MatchMode;
 import com.liuyue.autoTradeCycling.client.manager.VillagerTradeData;
+import com.liuyue.autoTradeCycling.common.SearchSpeed;
 import com.liuyue.autoTradeCycling.common.TradeTargets.EnchantRequirement;
 import com.liuyue.autoTradeCycling.common.TradeTargets.TargetEntry;
 import io.wispforest.owo.ui.base.BaseOwoScreen;
@@ -41,71 +42,39 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * 现代化图形配置界面（owo-lib 标签页版）。
- *
- * <h3>界面特性</h3>
- * <ul>
- *   <li>标签页设计：装备物品、附魔书、已选目标三个独立区域</li>
- *   <li>行内等级选择：点击附魔时在行内展开等级按钮组，直观快捷</li>
- *   <li>就地编辑：卡片内嵌选择器，数量/价格/等级全部原地修改</li>
- *   <li>状态保持：选中物品不重建列表，点击不会让滚动位置回弹</li>
- *   <li>视觉优化：鲜艳配色、渐变背景、悬停反馈、色彩分层</li>
- * </ul>
+ * 现代化图形配置界面（owo-lib 标签页版），统一管理装备物品/附魔书/已选目标。
  */
 public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
-    // ------------------------------------------------------------------ 现代配色方案
-    // 深色主题 + 鲜艳点缀色，不刺眼但有活力。
-
-    /** 根背景：深紫蓝渐变基调。 */
     private static final Color ROOT_BG = Color.ofArgb(0xFF0F111A);
-    /** 主面板背景：深蓝紫，科技感。 */
     private static final Color PANEL_BG = Color.ofArgb(0xFF1A1D2E);
-    /** 次级面板（卡片）：略浅的蓝灰。 */
     private static final Color CARD_BG = Color.ofArgb(0xFF16213E);
-    /** 面板描边：亮蓝色半透明，形成发光边框。 */
     private static final Color PANEL_BORDER = Color.ofArgb(0x664FC3F7);
-    /** 列表行底色：深蓝，内凹感。 */
     private static final Color ROW_BG = Color.ofArgb(0xFF0E1621);
-    /** 列表行悬停：靛蓝，明显反馈。 */
     private static final Color ROW_HOVER = Color.ofArgb(0xFF1E3A5F);
-    /** 选中行：亮青蓝，表示焦点。 */
     private static final Color ROW_SELECTED = Color.ofArgb(0xFF2A5298);
-    /** 选中行悬停：更亮的蓝。 */
     private static final Color ROW_SELECTED_HOVER = Color.ofArgb(0xFF3666BB);
-    /** 已加入目标的行：青绿色，积极状态。 */
     private static final Color ROW_ADDED = Color.ofArgb(0xFF1B4D3E);
-    /** 已加入目标悬停：亮青绿。 */
     private static final Color ROW_ADDED_HOVER = Color.ofArgb(0xFF26614F);
-    /** 内嵌选择器背景：更深。 */
     private static final Color PICKER_BG = Color.ofArgb(0xFF0A0C14);
-    /** 等级选择器背景：高亮青蓝，吸引注意。 */
     private static final Color LEVEL_PICKER_BG = Color.ofArgb(0xFF1A2E4A);
-    /** 标题/强调色：亮青色，醒目不刺眼。 */
     private static final Color TITLE = Color.ofArgb(0xFF4DD0E1);
-    /** 主文字：柔和白。 */
     private static final Color TEXT = Color.ofArgb(0xFFE8EAF6);
-    /** 次要文字：淡灰蓝。 */
     private static final Color DIM = Color.ofArgb(0xFF9FA8DA);
-    /** 积极状态色：明亮青绿。 */
     private static final Color ACTION = Color.ofArgb(0xFF4AE5B0);
-    /** 警告色：柔和的珊瑚红。 */
     private static final Color DANGER = Color.ofArgb(0xFFFF6B9D);
 
-    /** 新建目标的默认数量/价格。 */
     private static final int DEFAULT_MIN_COUNT = 1;
     private static final int DEFAULT_MAX_PRICE = 64;
-    /** 单次最多渲染的列表行数。 */
     private static final int MAX_ROWS = 300;
+    private static final int SEARCH_DEBOUNCE_TICKS = 4;
 
     private static final int TAB_ITEM = 0;
     private static final int TAB_BOOK = 1;
     private static final int TAB_TARGET = 2;
 
-    /** 一条附魔的可选信息。 */
     private record EnchOption(ResourceLocation id, String name, int maxLevel) {}
 
-    /** 物品行的组件引用，用于就地重绘。 */
     private static final class ItemRow {
         final FlowLayout row;
         final LabelComponent name;
@@ -117,12 +86,11 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    /** 附魔行的组件引用（支持行内展开等级选择器）。 */
     private static final class EnchRow {
         final FlowLayout row;
         final LabelComponent name;
         final ButtonComponent button;
-        final FlowLayout levelPicker; // 等级选择器容器（展开时可见）
+        final FlowLayout levelPicker;
         EnchRow(FlowLayout row, LabelComponent name, ButtonComponent button, FlowLayout levelPicker) {
             this.row = row;
             this.name = name;
@@ -130,8 +98,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             this.levelPicker = levelPicker;
         }
     }
-
-    // ------------------------------------------------------------------ 状态
 
     private int activeTab = TAB_ITEM;
     private boolean onlyTradeable = true;
@@ -141,35 +107,35 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
     private String itemEnchSearchText = "";
     private String bookEnchSearchText = "";
 
-    /** 卡片内嵌选择器的搜索词（重建卡片后仍保留）。 */
     private String pickerSearch = "";
-    /** 内嵌附魔选择器展开在哪张卡片上，null 表示都收起。 */
     private String openPickerKey;
-    /** 目标列表里哪些卡片处于展开状态。 */
     private final Set<String> expandedCards = new HashSet<>();
-    /** 「清空」按钮的两段式确认状态。 */
     private boolean confirmClear = false;
 
-    /** 当前展开等级选择器的附魔 ID（物品附魔列表）。 */
+    private int itemListDebounce = 0;
+    private int itemEnchDebounce = 0;
+    private int bookListDebounce = 0;
+    private boolean startButtonRunning = false;
+
     private ResourceLocation expandedItemEnchant;
-    /** 当前展开等级选择器的附魔 ID（附魔书列表）。 */
     private ResourceLocation expandedBookEnchant;
 
     private final List<Item> allItems = new ArrayList<>();
     private final List<EnchOption> allEnchants = new ArrayList<>();
     private final Map<ResourceLocation, EnchOption> enchById = new HashMap<>();
 
-    // ------------------------------------------------------------------ 组件引用
-
     private FlowLayout contentArea;
     private final ButtonComponent[] tabButtons = new ButtonComponent[3];
     private ButtonComponent startButton;
+    private ButtonComponent clearButton;
     private ButtonComponent modeButton;
+    private ButtonComponent speedButton;
     private LabelComponent itemEnchTitle;
     private FlowLayout itemListFlow;
     private FlowLayout itemEnchListFlow;
     private FlowLayout bookListFlow;
     private FlowLayout targetListFlow;
+    private final Map<ResourceLocation, String> itemNames = new HashMap<>();
     private final Map<ResourceLocation, ItemRow> itemRows = new HashMap<>();
     private final Map<ResourceLocation, EnchRow> itemEnchRows = new HashMap<>();
     private final Map<ResourceLocation, EnchRow> bookRows = new HashMap<>();
@@ -190,7 +156,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         root.surface(Surface.flat(ROOT_BG.argb()));
         cacheRegistries();
 
-        // 主界面容器：顶部栏 + 内容 + 底栏
         FlowLayout main = Containers.verticalFlow(Sizing.fill(100), Sizing.fill(100));
         main.gap(0);
         main.padding(Insets.of(10, 12, 10, 12));
@@ -205,8 +170,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         switchTab(TAB_ITEM);
     }
 
-    // ------------------------------------------------------------------ 顶部：标题 + 标签页
-
     private FlowLayout buildHeader() {
         FlowLayout header = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         header.gap(12);
@@ -218,7 +181,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
         header.child(horizontalSpacer());
 
-        // 三个标签页按钮，当前项高亮
         for (int tab = 0; tab < 3; tab++) {
             final int which = tab;
             tabButtons[tab] = createTabButton(which);
@@ -233,16 +195,17 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return btn;
     }
 
-    /** 切换标签页。重复点当前页不重建，滚动位置不丢。 */
     private void switchTab(int tab) {
         if (this.activeTab == tab && contentArea.children().size() > 0) {
             updateTabLabels();
             return;
         }
         this.activeTab = tab;
-        // 切换页面时收起所有等级选择器
         expandedItemEnchant = null;
         expandedBookEnchant = null;
+        itemListDebounce = 0;
+        itemEnchDebounce = 0;
+        bookListDebounce = 0;
         contentArea.clearChildren();
         switch (tab) {
             case TAB_BOOK -> contentArea.child(buildBookTab());
@@ -252,7 +215,23 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         updateTabLabels();
     }
 
-    /** 刷新标签页按钮文字（当前项加 § 高亮，目标页显示徽标）。 */
+    @Override
+    public void tick() {
+        super.tick();
+        syncStartButton();
+        if (itemListDebounce > 0 && --itemListDebounce == 0) rebuildItemList();
+        if (itemEnchDebounce > 0 && --itemEnchDebounce == 0) refreshItemEnchList();
+        if (bookListDebounce > 0 && --bookListDebounce == 0) rebuildBookList();
+    }
+
+    private void syncStartButton() {
+        if (startButton == null) return;
+        boolean running = AutoTradeManager.getInstance().isActive();
+        if (running == startButtonRunning) return;
+        startButtonRunning = running;
+        startButton.setMessage(Component.literal(running ? "§c■ 停止" : "§2▶ 开始"));
+    }
+
     private void updateTabLabels() {
         int count = AutoTradeManager.getInstance().getTargets().size();
         tabButtons[TAB_ITEM].setMessage(Component.literal(
@@ -263,8 +242,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         if (activeTab == TAB_TARGET) targetLabel = "§l§e" + targetLabel;
         tabButtons[TAB_TARGET].setMessage(Component.literal(targetLabel));
     }
-
-    // ------------------------------------------------------------------ 标签页一：装备物品
 
     private FlowLayout buildItemTab() {
         FlowLayout row = Containers.horizontalFlow(Sizing.fill(100), Sizing.fill(100));
@@ -295,7 +272,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         searchBox.text(itemSearchText);
         searchBox.onChanged().subscribe(text -> {
             this.itemSearchText = text;
-            rebuildItemList();
+            itemListDebounce = SEARCH_DEBOUNCE_TICKS;
         });
         FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         searchRow.child(searchBox);
@@ -340,7 +317,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         searchBox.text(itemEnchSearchText);
         searchBox.onChanged().subscribe(text -> {
             this.itemEnchSearchText = text;
-            refreshItemEnchList();
+            itemEnchDebounce = SEARCH_DEBOUNCE_TICKS;
         });
         FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         searchRow.child(searchBox);
@@ -356,7 +333,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return panel;
     }
 
-    /** 重建左侧物品列表。只在搜索词/过滤开关变化时调用。 */
     private void rebuildItemList() {
         if (itemListFlow == null) return;
         itemRows.clear();
@@ -369,7 +345,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         for (Item item : allItems) {
             ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
             if (!tradeable.isEmpty() && !tradeable.contains(id)) continue;
-            String name = item.getName(new ItemStack(item)).getString();
+            String name = itemNames.computeIfAbsent(id, key -> item.getName(new ItemStack(item)).getString());
             if (!query.isEmpty()
                     && !id.toString().toLowerCase(Locale.ROOT).contains(query)
                     && !name.toLowerCase(Locale.ROOT).contains(query)) continue;
@@ -413,7 +389,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return row;
     }
 
-    /** 就地重绘一行物品（选中/已添加/悬停三种状态叠加）。 */
     private void paintItemRow(ResourceLocation id, boolean hovered) {
         ItemRow row = itemRows.get(id);
         if (row == null) return;
@@ -440,14 +415,12 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         for (ResourceLocation id : itemRows.keySet()) paintItemRow(id, false);
     }
 
-    /** 点选物品：不重建左侧列表，只重绘行样式 + 重建右侧附魔列表。 */
     private void selectItem(Item item) {
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
         if (id.equals(selectedItemId)) return;
         ResourceLocation previous = selectedItemId;
         this.selectedItemId = id;
         this.selectedItemName = item.getName(new ItemStack(item)).getString();
-        // 切换选中物品时收起等级选择器
         expandedItemEnchant = null;
         if (previous != null) paintItemRow(previous, false);
         paintItemRow(id, false);
@@ -469,9 +442,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         updateTabLabels();
     }
 
-    // ------------------------------------------------------------------ 物品附魔列表（右侧）
-
-    /** 重建右侧附魔列表。 */
     private void refreshItemEnchList() {
         if (itemEnchListFlow == null) return;
         itemEnchRows.clear();
@@ -510,15 +480,12 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    /** 构造一条附魔行（支持行内展开等级选择器）。 */
     private void buildEnchRow(Map<ResourceLocation, EnchRow> rows, EnchOption option, boolean forItem) {
         FlowLayout listFlow = forItem ? itemEnchListFlow : bookListFlow;
         
-        // 垂直容器：主行 + 等级选择器
         FlowLayout container = Containers.verticalFlow(Sizing.fill(100), Sizing.content());
         container.gap(2);
         
-        // 主行
         FlowLayout row = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         row.gap(6);
         row.padding(Insets.of(4, 6, 4, 6));
@@ -531,8 +498,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         row.child(horizontalSpacer());
         row.child(Components.label(Component.literal("§8" + levelRange(option))).color(DIM));
 
-        // ButtonComponent button = smallButton(Component.literal(""), b -> toggleEnchantLevelPicker(option, forItem));
-        ButtonComponent button = tinyButton( "§b＋" , b -> toggleEnchantLevelPicker(option, forItem));
+        ButtonComponent button = tinyButton("§b＋", b -> toggleEnchantLevelPicker(option, forItem));
         row.child(button);
 
         row.mouseDown().subscribe((click, doubled) -> {
@@ -544,7 +510,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
         container.child(row);
         
-        // 等级选择器（初始隐藏）
         FlowLayout levelPicker = buildLevelPicker(option, forItem);
         container.child(levelPicker);
 
@@ -553,7 +518,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         paintEnchRow(rows, option.id(), false);
     }
 
-    /** 构建等级选择器（1 到 maxLevel 的按钮组）。 */
     private FlowLayout buildLevelPicker(EnchOption option, boolean forItem) {
         FlowLayout picker = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         picker.gap(4);
@@ -576,9 +540,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return picker;
     }
 
-    /** 切换附魔的等级选择器展开状态。 */
     private void toggleEnchantLevelPicker(EnchOption option, boolean forItem) {
-        // 已加入时直接移除，不展开选择器
         if (forItem) {
             if (selectedItemId == null) return;
             TargetEntry entry = AutoTradeManager.getInstance().findItemTarget(selectedItemId);
@@ -599,8 +561,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             }
         }
 
-        // 切换展开状态：就地更新受影响的两行，不重建整表
-        // （clearChildren() 会让列表内容高度瞬间归零，滚动位置会被 clamp 回顶部）
         Map<ResourceLocation, EnchRow> rows = forItem ? itemEnchRows : bookRows;
         ResourceLocation previous = forItem ? expandedItemEnchant : expandedBookEnchant;
         ResourceLocation now = option.id().equals(previous) ? null : option.id();
@@ -619,7 +579,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    /** 选择某个等级后加入目标。 */
     private void selectEnchantLevel(EnchOption option, int level, boolean forItem) {
         if (forItem) {
             if (selectedItemId == null) return;
@@ -629,7 +588,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
                 manager.addTarget(selectedItemId, new ArrayList<>(), DEFAULT_MIN_COUNT, DEFAULT_MAX_PRICE);
             }
             manager.addEnchantToItem(selectedItemId, new EnchantRequirement(option.id(), level));
-            expandedItemEnchant = null; // 选完收起
+            expandedItemEnchant = null;
             refreshItemRowStates();
             refreshItemEnchList();
         } else {
@@ -643,7 +602,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         updateTabLabels();
     }
 
-    /** 就地重绘一条附魔行（含等级选择器的显示/隐藏）。 */
     private void paintEnchRow(Map<ResourceLocation, EnchRow> rows, ResourceLocation id, boolean hovered) {
         EnchRow row = rows.get(id);
         if (row == null) return;
@@ -659,10 +617,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         paintEnchRowButton(rows, id);
     }
 
-    /**
-     * 只刷新一条附魔行的按钮与等级选择器，不触碰底色/悬停状态。
-     * 供展开/收起时就地更新，避免整表重建导致滚动位置回弹。
-     */
     private void paintEnchRowButton(Map<ResourceLocation, EnchRow> rows, ResourceLocation id) {
         EnchRow row = rows.get(id);
         if (row == null) return;
@@ -684,15 +638,8 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             row.button.tooltip(Component.literal("点击展开等级选择"));
         }
 
-        // 控制等级选择器可见性
         row.levelPicker.sizing(Sizing.fill(100), expanded ? Sizing.content() : Sizing.fixed(0));
     }
-
-    private void refreshEnchRowStates(Map<ResourceLocation, EnchRow> rows) {
-        for (ResourceLocation id : rows.keySet()) paintEnchRow(rows, id, false);
-    }
-
-    // ------------------------------------------------------------------ 标签页二：附魔书
 
     private FlowLayout buildBookTab() {
         FlowLayout panel = Containers.verticalFlow(Sizing.fill(100), Sizing.fill(100));
@@ -708,7 +655,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         searchBox.text(bookEnchSearchText);
         searchBox.onChanged().subscribe(text -> {
             this.bookEnchSearchText = text;
-            rebuildBookList();
+            bookListDebounce = SEARCH_DEBOUNCE_TICKS;
         });
         FlowLayout searchRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         searchRow.child(searchBox);
@@ -725,7 +672,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return panel;
     }
 
-    /** 重建附魔书列表。 */
     private void rebuildBookList() {
         if (bookListFlow == null) return;
         bookRows.clear();
@@ -751,8 +697,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    // ------------------------------------------------------------------ 标签页三：已选目标
-
     private FlowLayout buildTargetsTab() {
         FlowLayout panel = Containers.verticalFlow(Sizing.fill(100), Sizing.fill(100));
         panel.gap(6);
@@ -766,6 +710,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         titleRow.child(horizontalSpacer());
         ButtonComponent clear = smallButton(Component.literal("§c清空"), this::onClearButton);
         clear.tooltip(Component.literal("删除全部目标（点两次确认）"));
+        clearButton = clear;
         titleRow.child(clear);
         panel.child(titleRow);
 
@@ -792,10 +737,10 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         updateTabLabels();
     }
 
-    /** 整个目标列表按当前数据重建。 */
     private void rebuildTargetList() {
         if (targetListFlow == null) return;
         targetListFlow.clearChildren();
+        if (confirmClear && clearButton != null) clearButton.setMessage(Component.literal("§c清空"));
         confirmClear = false;
 
         List<TargetEntry> targets = AutoTradeManager.getInstance().getTargets();
@@ -809,10 +754,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    /**
-     * 一张目标卡片：标题行（展开/图标/名称/数量/价格/删除），
-     * 展开后是每条附魔的等级步进子行 + 内嵌的"添加附魔"选择器。
-     */
     private FlowLayout buildTargetCard(TargetEntry token) {
         String key = cardKey(token);
         boolean expanded = expandedCards.contains(key);
@@ -825,7 +766,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
         Runnable swapSelf = () -> swapCard(self[0], token);
 
-        // ---- 标题行
         FlowLayout header = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
         header.gap(6);
         header.verticalAlignment(VerticalAlignment.CENTER);
@@ -871,7 +811,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
         if (!expanded) return card;
 
-        // ---- 展开区：附魔子行
         for (EnchantRequirement requirement : new ArrayList<>(token.enchants())) {
             card.child(buildRequirementRow(token, requirement, swapSelf));
         }
@@ -895,7 +834,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return card;
     }
 
-    /** 卡片里一条附魔要求：名称 + 等级步进器 + 移除按钮。 */
     private FlowLayout buildRequirementRow(TargetEntry token, EnchantRequirement requirement,
                                            Runnable swapSelf) {
         FlowLayout row = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
@@ -920,7 +858,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return row;
     }
 
-    /** 已有附魔要求的等级步进器。 */
     private FlowLayout requirementLevelControl(TargetEntry token, EnchantRequirement requirement, EnchOption option) {
         int maxLevel = option != null && option.maxLevel() > 0 ? option.maxLevel() : 10;
         FlowLayout control = Containers.horizontalFlow(Sizing.content(), Sizing.content());
@@ -944,7 +881,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return control;
     }
 
-    /** 卡片内嵌的附魔选择器（支持行内等级选择）。 */
     private FlowLayout buildCardPicker(ResourceLocation itemId, Runnable swapSelf) {
         FlowLayout picker = Containers.verticalFlow(Sizing.fill(100), Sizing.content());
         picker.gap(4);
@@ -993,9 +929,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    /** 卡片内嵌选择器的附魔行（点击后弹出等级选择对话框）。 */
     private FlowLayout buildPickerRow(ResourceLocation itemId, EnchOption option, Runnable swapSelf) {
-        // 容器：主行 + 等级选择器
         FlowLayout container = Containers.verticalFlow(Sizing.fill(100), Sizing.content());
         container.gap(2);
         
@@ -1016,8 +950,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         
         container.child(row);
         
-        // 行内等级选择器
-        FlowLayout levelPicker = Containers.horizontalFlow(Sizing.fill(100), Sizing.fixed(0)); // 初始隐藏
+        FlowLayout levelPicker = Containers.horizontalFlow(Sizing.fill(100), Sizing.fixed(0));
         levelPicker.gap(3);
         levelPicker.padding(Insets.of(4));
         levelPicker.surface(Surface.flat(LEVEL_PICKER_BG.argb()));
@@ -1055,7 +988,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return container;
     }
 
-    /** 用新卡片替换旧卡片（只动这一张，滚动位置基本保持）。 */
     private void swapCard(FlowLayout oldCard, TargetEntry token) {
         if (targetListFlow == null) return;
         TargetEntry latest = AutoTradeManager.getInstance().latest(token);
@@ -1069,8 +1001,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         targetListFlow.removeChild(oldCard);
         updateTabLabels();
     }
-
-    // ------------------------------------------------------------------ 底部操作栏
 
     private FlowLayout buildFooter() {
         AutoTradeManager manager = AutoTradeManager.getInstance();
@@ -1087,9 +1017,19 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         modeButton.tooltip(Component.literal("全部：所有目标都要刷出\n任一：刷出任意一个就提醒"));
         footer.child(modeButton);
 
+        speedButton = smallButton(speedLabel(), button -> {
+            AutoTradeManager m = AutoTradeManager.getInstance();
+            m.setSearchSpeed(m.getSearchSpeed().next());
+            button.setMessage(speedLabel());
+            button.tooltip(speedTooltip());
+        });
+        speedButton.tooltip(speedTooltip());
+        footer.child(speedButton);
+
         footer.child(horizontalSpacer());
 
-        startButton = Components.button(Component.literal(manager.isActive() ? "§c■ 停止" : "§2▶ 开始"),
+        startButtonRunning = manager.isActive();
+        startButton = Components.button(Component.literal(startButtonRunning ? "§c■ 停止" : "§2▶ 开始"),
                 button -> onStartStop());
         startButton.sizing(Sizing.fixed(80), Sizing.fixed(24));
         footer.child(startButton);
@@ -1103,13 +1043,28 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
                 ? "§7匹配: §e全部" : "§7匹配: §e任一");
     }
 
-    // ------------------------------------------------------------------ 开始/停止
+    private Component speedLabel() {
+        return Component.literal("§7速度: §e" + AutoTradeManager.getInstance().getSearchSpeed().label());
+    }
+
+    private Component speedTooltip() {
+        SearchSpeed current = AutoTradeManager.getInstance().getSearchSpeed();
+        StringBuilder text = new StringBuilder("§b服务端每 tick 的重掷强度\n§7档位越高刷得越快，占用服务端也越多");
+        for (SearchSpeed speed : SearchSpeed.values()) {
+            text.append('\n').append(speed == current ? "§a▶ " : "§7  ").append(speed.label()).append("§7: ")
+                    .append(speed.unlimitedTime()
+                            ? "不设时间预算，单 tick 最多刷 " + speed.maxAttemptsPerTick() + " 次（可能明显卡顿）"
+                            : "单 tick 约 " + (speed.timeBudgetNanos() / 1_000_000) + "ms、最多 "
+                                    + speed.maxAttemptsPerTick() + " 次");
+        }
+        return Component.literal(text.toString());
+    }
 
     private void onStartStop() {
         AutoTradeManager manager = AutoTradeManager.getInstance();
         if (manager.isActive()) {
             manager.cancel();
-            if (startButton != null) startButton.setMessage(Component.literal("§2▶ 开始"));
+            syncStartButton();
             return;
         }
         if (manager.getTargets().isEmpty()) {
@@ -1130,23 +1085,18 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return false;
     }
 
-    // ------------------------------------------------------------------ 通用小组件
-
-    /** 宽度按内容、高度 24 的按钮。 */
     private static ButtonComponent smallButton(Component text, Consumer<ButtonComponent> onPress) {
         ButtonComponent button = Components.button(text, onPress);
         button.sizing(Sizing.content(), Sizing.fixed(24));
         return button;
     }
 
-    /** 24×24 的方形按钮。 */
     private static ButtonComponent tinyButton(String text, Consumer<ButtonComponent> onPress) {
         ButtonComponent button = Components.button(Component.literal(text), onPress);
         button.sizing(Sizing.fixed(24), Sizing.fixed(24));
         return button;
     }
 
-    /** 数字输入框。 */
     private static TextBoxComponent numericBox(String initial) {
         TextBoxComponent box = Components.textBox(Sizing.fixed(40));
         box.setMaxLength(4);
@@ -1154,15 +1104,15 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return box;
     }
 
-    // ------------------------------------------------------------------ 数据与工具
-
     private void cacheRegistries() {
         allItems.clear();
+        itemNames.clear();
         for (Item item : BuiltInRegistries.ITEM) {
             if (item == Items.AIR) continue;
             allItems.add(item);
+            itemNames.put(BuiltInRegistries.ITEM.getKey(item), item.getName(new ItemStack(item)).getString());
         }
-        allItems.sort(Comparator.comparing(item -> item.getName(new ItemStack(item)).getString()));
+        allItems.sort(Comparator.comparing(item -> itemNames.get(BuiltInRegistries.ITEM.getKey(item))));
 
         allEnchants.clear();
         enchById.clear();
@@ -1180,12 +1130,10 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         allEnchants.sort(Comparator.comparing(EnchOption::name));
     }
 
-    /** 圆角卡片底色。 */
     private static Surface cardSurface() {
         return Surface.flat(CARD_BG.argb()).and(Surface.outline(PANEL_BORDER.argb()));
     }
 
-    /** 圆角行底色（比卡片略小的圆角）。 */
     private static Surface roundedSurface(Color color) {
         return Surface.flat(color.argb());
     }
@@ -1255,7 +1203,9 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return option != null ? option.name() : id.getPath();
     }
 
-    private static String itemName(ResourceLocation id) {
+    private String itemName(ResourceLocation id) {
+        String cached = itemNames.get(id);
+        if (cached != null) return cached;
         return BuiltInRegistries.ITEM.getOptional(id)
                 .map(item -> item.getName(new ItemStack(item)).getString())
                 .orElse(id.toString());

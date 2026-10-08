@@ -3,6 +3,7 @@ package com.liuyue.autoTradeCycling.client;
 import com.liuyue.autoTradeCycling.client.command.AutoTradeCommand;
 import com.liuyue.autoTradeCycling.client.gui.AutoTradeConfigScreen;
 import com.liuyue.autoTradeCycling.client.manager.AutoTradeManager;
+import com.liuyue.autoTradeCycling.client.manager.TargetStore;
 import com.liuyue.autoTradeCycling.net.SearchResultPayload;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
@@ -12,6 +13,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 
+/** 客户端入口：注册命令、按键、网络接收与 tick 回调。 */
 public class AutoTradeCyclingClient implements ClientModInitializer {
 
     private static KeyMapping openConfigKey;
@@ -19,6 +21,7 @@ public class AutoTradeCyclingClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         AutoTradeCommand.register();
+        TargetStore.load();
 
         openConfigKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
                 "key.auto-trade-cycling.open_config",
@@ -41,13 +44,11 @@ public class AutoTradeCyclingClient implements ClientModInitializer {
         }
     }
 
-    /** 按快捷键打开图形化配置界面。 */
     private static void onEndTick(Minecraft client) {
         if (client == null) return;
+        TargetStore.flushIfDirty();
         while (openConfigKey.consumeClick()) {
             if (!(client.screen instanceof AutoTradeConfigScreen)) {
-                // 打开配置界面会关闭交易容器，服务端那边的搜索随之结束。
-                // 这里同步把客户端状态也停掉，否则界面上的按钮会停留在"停止"。
                 AutoTradeManager.getInstance().cancel();
                 client.setScreen(new AutoTradeConfigScreen());
             }

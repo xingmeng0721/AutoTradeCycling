@@ -1,5 +1,6 @@
 package com.liuyue.autoTradeCycling.server;
 
+import com.liuyue.autoTradeCycling.common.SearchSpeed;
 import com.liuyue.autoTradeCycling.common.TradeTargets;
 import com.liuyue.autoTradeCycling.common.TradeTargets.TargetEntry;
 import com.liuyue.autoTradeCycling.mixin.MerchantMenuAccessor;
@@ -31,25 +32,13 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 服务端批量搜索：在收到请求后连续重掷村民交易，直到命中目标或玩家手动停止
- * （关闭交易界面 / 打开配置界面都会关闭容器，搜索随之结束）。
- * 相比"客户端每刷新一次发一个包"，省掉了每次的网络往返，是主要提速来源。
- *
- * <p>重掷分 tick 进行（每 tick 最多 {@link #MAX_ATTEMPTS_PER_TICK} 次、且不超过
- * {@link #TICK_TIME_BUDGET_NANOS} 的时间预算），避免一次性长时间占用主线程。
- * 村民的准入条件与 Trade Cycling 保持一致，保证结果合法：必须在交易界面里、
- * 是未交易过的村民、且已绑定工作站。
+ * 服务端批量搜索：在收到请求后连续重掷村民交易，直到命中目标或玩家手动停止。
+ * 重掷分 tick 进行，每 tick 刷多少次由客户端选的 {@link SearchSpeed} 决定。
  */
 public final class ServerSearchHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("auto-trade-cycling");
 
-    /** 每 tick 给单个搜索的时间预算，按实际耗时自适应，机器快就刷得多、慢就刷得少，
-     *  既不会把 tick 占满，也不用猜"每 tick 多少次"这个数。 */
-    private static final long TICK_TIME_BUDGET_NANOS = 10_000_000L;
-    /** 每 tick 的硬上限，防止极快的机器上单次请求把 tick 拉长。 */
-    private static final int MAX_ATTEMPTS_PER_TICK = 400;
-    /** 每隔多少 tick 回传一次进度，让客户端能看到刷新计数在涨。 */
     private static final int PROGRESS_INTERVAL_TICKS = 20;
 
     private static final Map<UUID, Search> ACTIVE = new HashMap<>();
@@ -63,10 +52,7 @@ public final class ServerSearchHandler {
         ServerTickEvents.END_SERVER_TICK.register(server -> tick());
     }
 
-    // ---------------------------------------------------------------- 请求
-
     private static void start(ServerPlayer player, SearchTradesPayload payload) {
-        // 同一玩家同时只保留一个搜索，新请求顶掉旧的
         ACTIVE.remove(player.getUUID());
 
         AbstractContainerMenu containerMenu = player.containerMenu;
@@ -80,7 +66,10 @@ public final class ServerSearchHandler {
             reject(player);
             return;
         }
-        // 已交易过的村民交易不会重掷，官方 Trade Cycling 也是这么拦的
+        if (villager.getVillagerData().level() != 1) {
+            reject(player);
+            return;
+        }
         if (villager.getVillagerXp() > 0) {
             reject(player);
             return;
@@ -95,15 +84,14 @@ public final class ServerSearchHandler {
             return;
         }
 
-        // 记一笔本轮的候选人报价，便于事后排查（装了 VT 时这里是含 2-5 级的合并列表）
         MerchantOffers visible = candidateOffers(villager);
-        LOGGER.info("批量搜索开始: 候选人报价 {} 条 ({})", visible.size(), describeOffers(visible));
+        LOGGER.info("批量搜索开始: 档位 {}，候选人报价 {} 条 ({})",
+                payload.speed().label(), visible.size(), describeOffers(visible));
 
         ACTIVE.put(player.getUUID(), new Search(player, villager, villagerAccessor, menu,
-                menuAccessor.getTradeContainer(), targets, payload.matchAny()));
+                menuAccessor.getTradeContainer(), targets, payload.matchAny(), payload.speed()));
     }
 
-    /** 取前若干条报价的结果物品，用于诊断输出。 */
     private static String describeOffers(MerchantOffers offers) {
         Set<ResourceLocation> ids = new LinkedHashSet<>();
         for (MerchantOffer offer : offers) {
@@ -118,14 +106,11 @@ public final class ServerSearchHandler {
         return builder.toString();
     }
 
-    // ---------------------------------------------------------------- 分 tick 推进
-
     private static void tick() {
         if (ACTIVE.isEmpty()) return;
         Iterator<Map.Entry<UUID, Search>> iterator = ACTIVE.entrySet().iterator();
         while (iterator.hasNext()) {
             Search search = iterator.next().getValue();
-            // 玩家关掉了交易界面就静默停止
             if (search.player.isRemoved() || search.player.containerMenu != search.menu) {
                 iterator.remove();
                 continue;
@@ -134,7 +119,6 @@ public final class ServerSearchHandler {
                 iterator.remove();
                 continue;
             }
-            // 搜索还在进行，定期把已尝试次数回传给客户端
             if (++search.ticksSinceReport >= PROGRESS_INTERVAL_TICKS) {
                 search.ticksSinceReport = 0;
                 reply(search.player,
@@ -143,30 +127,27 @@ public final class ServerSearchHandler {
         }
     }
 
-    /** 推进一轮，返回 true 表示搜索已结束（命中目标）。 */
     private static boolean step(Search search) {
-        long deadline = System.nanoTime() + TICK_TIME_BUDGET_NANOS;
-        for (int i = 0; i < MAX_ATTEMPTS_PER_TICK; i++) {
+        SearchSpeed speed = search.speed;
+        long deadline = speed.unlimitedTime() ? 0L : System.nanoTime() + speed.timeBudgetNanos();
+        for (int i = 0; i < speed.maxAttemptsPerTick(); i++) {
             search.attempts++;
             reroll(search);
-            List<Integer> matched = TradeTargets.matchIndices(candidateOffers(search.villager), search.targets);
+            MerchantOffers offers = candidateOffers(search.villager);
+            List<Integer> matched = TradeTargets.matchIndices(offers, search.targets);
             if (TradeTargets.isMatch(matched, search.targets.size(), search.matchAny)) {
-                finish(search, matched);
+                finish(search, matched, offers);
                 return true;
             }
-            if (System.nanoTime() >= deadline) break;
+            if (deadline != 0L && System.nanoTime() >= deadline) break;
         }
         return false;
     }
 
-    /** 本轮的候选人报价：VT 的合并列表（1 级 + 2-5 级锁定交易）。
-     *  注意不能用 villager.getOffers()——VT 把 2-5 级从那里摘走了，只剩当前等级的 2 条。 */
     private static MerchantOffers candidateOffers(Villager villager) {
         return VisibleTradersServer.combinedOffers(villager);
     }
 
-    /** 与 Trade Cycling 单轮刷新等价的一步：重掷报价、重算折扣，并重建 VT 的分级交易。
-     *  VT 的重建必须放在这里，不能挪到 finish()，否则参与匹配的和最后发出去的就不是同一份。 */
     private static void reroll(Search search) {
         Villager villager = search.villager;
         villager.setOffers(null);
@@ -176,12 +157,10 @@ public final class ServerSearchHandler {
         VisibleTradersServer.regenerateTrades(villager);
     }
 
-    /** 命中后把最终报价同步给客户端，并回传搜索结果。 */
-    private static void finish(Search search, List<Integer> matched) {
+    private static void finish(Search search, List<Integer> matched, MerchantOffers offers) {
         Villager villager = search.villager;
-        // 必须发合并列表：VT 只 hook 了 openTradingScreen，我们直接调 sendMerchantOffers 绕过了它
-        search.player.sendMerchantOffers(search.menu.containerId, candidateOffers(villager),
-                villager.getVillagerData().level(), villager.getVillagerXp(),
+        search.player.sendMerchantOffers(search.menu.containerId, offers,
+                VisibleTradersServer.shiftedLevel(villager), villager.getVillagerXp(),
                 villager.showProgressBar(), villager.canRestock());
         search.menu.slotsChanged(search.container);
 
@@ -205,11 +184,12 @@ public final class ServerSearchHandler {
         final MerchantContainer container;
         final List<TargetEntry> targets;
         final boolean matchAny;
+        final SearchSpeed speed;
         int attempts;
         int ticksSinceReport;
 
         Search(ServerPlayer player, Villager villager, VillagerAccessor villagerAccessor, MerchantMenu menu,
-               MerchantContainer container, List<TargetEntry> targets, boolean matchAny) {
+               MerchantContainer container, List<TargetEntry> targets, boolean matchAny, SearchSpeed speed) {
             this.player = player;
             this.villager = villager;
             this.villagerAccessor = villagerAccessor;
@@ -217,6 +197,7 @@ public final class ServerSearchHandler {
             this.container = container;
             this.targets = targets;
             this.matchAny = matchAny;
+            this.speed = speed;
         }
     }
 }

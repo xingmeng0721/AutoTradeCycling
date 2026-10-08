@@ -1,6 +1,7 @@
 package com.liuyue.autoTradeCycling.client.command;
 
 import com.liuyue.autoTradeCycling.client.manager.AutoTradeManager;
+import com.liuyue.autoTradeCycling.common.TradeTargets;
 import com.liuyue.autoTradeCycling.common.TradeTargets.EnchantRequirement;
 import com.liuyue.autoTradeCycling.common.TradeTargets.TargetEntry;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/** 客户端 /autotrade 命令，用于增删与查询交易目标。 */
 public class AutoTradeCommand {
 
     public static void register() {
@@ -61,11 +63,17 @@ public class AutoTradeCommand {
             var removeNode = ClientCommandManager.literal("remove")
                     .then(ClientCommandManager.argument("id", StringArgumentType.greedyString())
                             .suggests((ctx, builder) -> {
-                                AutoTradeManager.getInstance().getTargets()
+                                AutoTradeManager.getInstance().getTargets().stream()
+                                        .filter(t -> !t.isEnchantedBook())
                                         .forEach(t -> builder.suggest(t.id().toString()));
                                 return builder.buildFuture();
                             })
                             .executes(AutoTradeCommand::executeRemove));
+
+            var removeBookNode = ClientCommandManager.literal("removeBook")
+                    .then(ClientCommandManager.argument("name", StringArgumentType.greedyString())
+                            .suggests(BOOK_TARGET_SUGGESTIONS)
+                            .executes(AutoTradeCommand::executeRemoveBook));
 
             var removeAllNode = ClientCommandManager.literal("removeAll")
                     .executes(AutoTradeCommand::executeRemoveAll);
@@ -91,6 +99,7 @@ public class AutoTradeCommand {
             var root = ClientCommandManager.literal("autoTradeCycling")
                     .then(addNode)
                     .then(removeNode)
+                    .then(removeBookNode)
                     .then(removeAllNode)
                     .then(listNode)
                     .then(startNode)
@@ -126,7 +135,7 @@ public class AutoTradeCommand {
         var req = new EnchantRequirement(enchId, minLevel);
         ResourceLocation bookId = BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.ENCHANTED_BOOK);
         if (!AutoTradeManager.getInstance().addTarget(bookId, java.util.List.of(req), 1, maxPrice)) {
-            send(ctx, "§c该附魔要求已存在，未重复添加");
+            send(ctx, "§c该附魔的附魔书目标已存在，未重复添加（如需改等级请用 removeBook 后再加）");
             return 0;
         }
         send(ctx, "§a已添加: §e" + enchId + " §7(" + input + " 等级>=" + minLevel + " 价格<=" + maxPrice + ")");
@@ -157,8 +166,24 @@ public class AutoTradeCommand {
         String input = StringArgumentType.getString(ctx, "id");
         ResourceLocation id = ResourceLocation.tryParse(input);
         if (id == null) { send(ctx, "§c无效ID: " + input); return 0; }
-        AutoTradeManager.getInstance().removeTarget(id);
-        send(ctx, "§c已移除: " + id);
+        if (TradeTargets.isEnchantedBookId(id)) {
+            send(ctx, "§c附魔书目标不能按物品 ID 移除，请用 /autoTradeCycling removeBook <附魔名>");
+            return 0;
+        }
+        int removed = AutoTradeManager.getInstance().removeTarget(id);
+        if (removed == 0) { send(ctx, "§c没有该物品的目标: " + id); return 0; }
+        send(ctx, "§c已移除 " + removed + " 条: " + id);
+        send(ctx, "§7当前列表: " + formatTargets());
+        return 1;
+    }
+
+    private static int executeRemoveBook(CommandContext<FabricClientCommandSource> ctx) {
+        String input = StringArgumentType.getString(ctx, "name");
+        ResourceLocation enchantId = findEnchantment(input);
+        if (enchantId == null) { send(ctx, "§c找不到附魔: " + input); return 0; }
+        int removed = AutoTradeManager.getInstance().removeBookTarget(enchantId);
+        if (removed == 0) { send(ctx, "§c没有该附魔的附魔书目标: " + input); return 0; }
+        send(ctx, "§c已移除附魔书目标: " + input);
         send(ctx, "§7当前列表: " + formatTargets());
         return 1;
     }
@@ -214,6 +239,16 @@ public class AutoTradeCommand {
         return null;
     }
 
+    private static final SuggestionProvider<FabricClientCommandSource> BOOK_TARGET_SUGGESTIONS =
+            (ctx, builder) -> {
+                AutoTradeManager.getInstance().getTargets().stream()
+                        .filter(TargetEntry::isEnchantedBook)
+                        .flatMap(t -> t.enchants().stream())
+                        .map(req -> "\"" + findEnchantmentName(req.id()) + "\"")
+                        .forEach(builder::suggest);
+                return builder.buildFuture();
+            };
+
     private static final SuggestionProvider<FabricClientCommandSource> ENCHANTMENT_SUGGESTIONS =
             (ctx, builder) -> {
                 String input = builder.getRemaining().toLowerCase();
@@ -246,12 +281,12 @@ public class AutoTradeCommand {
                 .map(t -> {
                     String name;
                     if (t.isEnchantedBook()) {
-                        name = findEnchantmentName(t.id());
+                        name = t.enchants().isEmpty() ? t.id().toString() : findEnchantmentName(t.enchants().get(0).id());
                     } else {
                         var item = BuiltInRegistries.ITEM.get(t.id()).map(net.minecraft.core.Holder.Reference::value).orElse(null);
                         name = item != null ? item.getName(new ItemStack(item)).getString() : t.id().toString();
                     }
-                    return t.id() + "(" + name + " x" + t.minCount() + " <=" + t.maxPrice() + ")";
+                    return name + "(x" + t.minCount() + " <=" + t.maxPrice() + ")";
                 }).collect(Collectors.joining(", "));
     }
 

@@ -13,6 +13,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 
+/** 在交易界面标题的「交易」后追加已刷新次数。 */
 @Mixin(MerchantScreen.class)
 public class CycleCountDisplay {
 
