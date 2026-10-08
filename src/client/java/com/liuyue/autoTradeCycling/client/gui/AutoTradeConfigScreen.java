@@ -42,7 +42,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * 现代化图形配置界面（owo-lib 标签页版），统一管理装备物品/附魔书/已选目标。
+ * owo-lib 标签页版，统一管理装备物品/附魔书/已选目标。
  */
 public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 

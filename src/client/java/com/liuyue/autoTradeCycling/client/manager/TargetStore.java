@@ -22,7 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 已选目标的本地存档（config/auto-trade-cycling.json），改动延后合并、由客户端每 tick 落盘。
+ * 已选目标的本地存档（config/auto-trade-cycling.json）
  */
 public final class TargetStore {
 

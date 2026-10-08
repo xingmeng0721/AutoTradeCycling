@@ -36,10 +36,8 @@ Minecraft Fabric 客户端模组：自动重掷村民交易，直到刷出指定
 ./gradlew build
 ```
 
-产物在 `build/libs/`。
 
 ## 协议
 
 LGPL-3.0，见 [LICENSE.txt](LICENSE.txt)。
 
-本仓库不含 Trade Cycling 与 Visible Traders 的源码，二者仅作为已发布的 jar 依赖引用。

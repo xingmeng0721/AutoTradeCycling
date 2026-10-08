@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 服务端批量搜索的状态回传：进度、结果、拒绝原因共用这一个包。
+ * 服务端批量搜索的状态回传：进度、结果、拒绝原因。
  */
 public record SearchResultPayload(int status, int attempts, List<Integer> matched) implements CustomPacketPayload {
 
