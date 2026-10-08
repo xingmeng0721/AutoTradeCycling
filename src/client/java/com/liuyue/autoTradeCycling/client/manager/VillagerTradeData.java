@@ -2,19 +2,26 @@ package com.liuyue.autoTradeCycling.client.manager;
 
 import com.liuyue.autoTradeCycling.mixin.VillagerTradeAccessor;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.tags.EnchantmentTags;
+import net.minecraft.tags.PotionTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.trading.VillagerTrade;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -26,6 +33,7 @@ public final class VillagerTradeData {
 
     private static Set<Identifier> itemCache;
     private static volatile Set<Identifier> syncedItems = Set.of();
+    private static List<Identifier> potionCache;
 
     private VillagerTradeData() {
     }
@@ -77,6 +85,41 @@ public final class VillagerTradeData {
         if (ids.size() < 10) return Set.of();
         itemCache = ids;
         return itemCache;
+    }
+
+    public static synchronized List<Identifier> tradeablePotions() {
+        if (potionCache != null) return potionCache;
+
+        Minecraft client = Minecraft.getInstance();
+        Registry<Potion> registry = client.level == null ? null
+                : client.level.registryAccess().lookup(Registries.POTION).orElse(null);
+        if (registry == null) registry = BuiltInRegistries.POTION;
+
+        List<Identifier> ids = new ArrayList<>();
+        for (Holder<Potion> holder : registry.getTagOrEmpty(PotionTags.TRADEABLE)) {
+            holder.unwrapKey().map(ResourceKey::identifier)
+                    .filter(id -> !id.getPath().startsWith("long_"))
+                    .ifPresent(ids::add);
+        }
+        if (ids.isEmpty()) return List.of();
+        ids.sort(Comparator.comparing(VillagerTradeData::potionSortKey));
+        potionCache = ids;
+        return potionCache;
+    }
+
+    private static String potionSortKey(Identifier id) {
+        String path = id.getPath();
+        if (path.startsWith("strong_")) return path.substring(7) + "|1";
+        return path + "|0";
+    }
+
+    public static Component potionName(Identifier potionId) {
+        Potion potion = BuiltInRegistries.POTION.getValue(potionId);
+        if (potion == null) return Component.literal(potionId.getPath());
+        Component base = new PotionContents(BuiltInRegistries.POTION.wrapAsHolder(potion))
+                .getName("item.minecraft.tipped_arrow.effect.");
+        if (potionId.getPath().startsWith("strong_")) return Component.literal("强效 ").append(base);
+        return base;
     }
 
     public static boolean enchantOnTradedEquipment(Identifier enchantId) {

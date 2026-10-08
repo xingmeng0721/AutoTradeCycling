@@ -35,7 +35,12 @@ public class AutoTradeCyclingClient implements ClientModInitializer {
                 context.client().execute(() -> AutoTradeManager.getInstance().onSearchResult(payload)));
 
         ClientPlayNetworking.registerGlobalReceiver(TradeableItemsPayload.TYPE, (payload, context) ->
-                context.client().execute(() -> VillagerTradeData.acceptSynced(payload.items())));
+                context.client().execute(() -> {
+                    VillagerTradeData.acceptSynced(payload.items());
+                    if (ClientScreens.current() instanceof AutoTradeConfigScreen screen) {
+                        screen.onTradeableItemsSynced();
+                    }
+                }));
 
         ClientTickEvents.START_CLIENT_TICK.register(AutoTradeCyclingClient::onClientTick);
         ClientTickEvents.END_CLIENT_TICK.register(AutoTradeCyclingClient::onEndTick);

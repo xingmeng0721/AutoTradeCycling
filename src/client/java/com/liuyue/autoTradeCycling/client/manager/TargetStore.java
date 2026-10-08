@@ -98,6 +98,7 @@ public final class TargetStore {
             object.addProperty("id", entry.id().toString());
             object.addProperty("minCount", entry.minCount());
             object.addProperty("maxPrice", entry.maxPrice());
+            if (entry.potion() != null) object.addProperty("potion", entry.potion().toString());
 
             JsonArray enchants = new JsonArray();
             for (EnchantRequirement requirement : entry.enchants()) {
@@ -144,6 +145,8 @@ public final class TargetStore {
                 enchants.add(new EnchantRequirement(enchantId, minLevel));
             }
         }
-        return new TargetEntry(id, enchants, minCount, maxPrice);
+        Identifier potion = null;
+        if (object.has("potion")) potion = Identifier.tryParse(object.get("potion").getAsString());
+        return new TargetEntry(id, enchants, minCount, maxPrice, potion);
     }
 }

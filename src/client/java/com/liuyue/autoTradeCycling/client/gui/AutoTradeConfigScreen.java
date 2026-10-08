@@ -28,6 +28,8 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.Potion;
+import net.minecraft.world.item.alchemy.PotionContents;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -75,14 +77,23 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
     private record EnchOption(Identifier id, String name, int maxLevel) {}
 
+    private record ItemRowData(Item item, Identifier id, Identifier potion, String label) {}
+
     private static final class ItemRow {
         final FlowLayout row;
         final LabelComponent name;
         final ButtonComponent state;
-        ItemRow(FlowLayout row, LabelComponent name, ButtonComponent state) {
+        final Identifier id;
+        final Identifier potion;
+        final String label;
+        ItemRow(FlowLayout row, LabelComponent name, ButtonComponent state,
+                Identifier id, Identifier potion, String label) {
             this.row = row;
             this.name = name;
             this.state = state;
+            this.id = id;
+            this.potion = potion;
+            this.label = label;
         }
     }
 
@@ -102,6 +113,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
     private int activeTab = TAB_ITEM;
     private boolean onlyTradeable = true;
     private Identifier selectedItemId;
+    private String selectedItemKey;
     private String selectedItemName = "";
     private String itemSearchText = "";
     private String itemEnchSearchText = "";
@@ -130,13 +142,14 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
     private ButtonComponent clearButton;
     private ButtonComponent modeButton;
     private ButtonComponent speedButton;
+    private ButtonComponent filterButton;
     private LabelComponent itemEnchTitle;
     private FlowLayout itemListFlow;
     private FlowLayout itemEnchListFlow;
     private FlowLayout bookListFlow;
     private FlowLayout targetListFlow;
     private final Map<Identifier, String> itemNames = new HashMap<>();
-    private final Map<Identifier, ItemRow> itemRows = new HashMap<>();
+    private final Map<String, ItemRow> itemRows = new HashMap<>();
     private final Map<Identifier, EnchRow> itemEnchRows = new HashMap<>();
     private final Map<Identifier, EnchRow> bookRows = new HashMap<>();
 
@@ -207,6 +220,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         itemEnchDebounce = 0;
         bookListDebounce = 0;
         contentArea.clearChildren();
+        filterButton = null;
         switch (tab) {
             case TAB_BOOK -> contentArea.child(buildBookTab());
             case TAB_TARGET -> contentArea.child(buildTargetsTab());
@@ -294,7 +308,17 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         });
         filter.active(VillagerTradeData.hasCandidates());
         filter.tooltip(Component.literal("只显示村民可能出售的物品"));
+        filterButton = filter;
         return filter;
+    }
+
+    public void onTradeableItemsSynced() {
+        if (activeTab != TAB_ITEM) return;
+        if (filterButton != null) {
+            filterButton.active(VillagerTradeData.hasCandidates());
+            filterButton.setMessage(filterLabel());
+        }
+        rebuildItemList();
     }
 
     private Component filterLabel() {
@@ -341,17 +365,32 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         String query = itemSearchText.trim().toLowerCase(Locale.ROOT);
         Set<Identifier> tradeable = onlyTradeable ? VillagerTradeData.villagerItems() : Set.of();
 
-        int shown = 0;
+        List<ItemRowData> rows = new ArrayList<>();
         for (Item item : allItems) {
+            if (item == Items.POTION) continue;
             Identifier id = BuiltInRegistries.ITEM.getKey(item);
             if (!tradeable.isEmpty() && !tradeable.contains(id)) continue;
+
+            if (item == Items.TIPPED_ARROW) {
+                if (matchesRowQuery(query, id, "药水箭")) {
+                    rows.add(new ItemRowData(item, id, null, "药水箭"));
+                }
+                for (Identifier potion : VillagerTradeData.tradeablePotions()) {
+                    String label = "药水箭 · " + VillagerTradeData.potionName(potion).getString();
+                    if (matchesRowQuery(query, id, label)) rows.add(new ItemRowData(item, id, potion, label));
+                }
+                continue;
+            }
+
             String name = itemNames.computeIfAbsent(id, key -> item.getName(new ItemStack(item)).getString());
-            if (!query.isEmpty()
-                    && !id.toString().toLowerCase(Locale.ROOT).contains(query)
-                    && !name.toLowerCase(Locale.ROOT).contains(query)) continue;
+            if (matchesRowQuery(query, id, name)) rows.add(new ItemRowData(item, id, null, name));
+        }
+
+        int shown = 0;
+        for (ItemRowData data : rows) {
             if (shown >= MAX_ROWS) break;
             shown++;
-            itemListFlow.child(buildItemRow(item, id, name));
+            itemListFlow.child(buildItemRow(data));
         }
 
         if (shown == 0) {
@@ -361,39 +400,57 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         }
     }
 
-    private FlowLayout buildItemRow(Item item, Identifier id, String name) {
+    private static boolean matchesRowQuery(String lowerQuery, Identifier id, String label) {
+        return lowerQuery.isEmpty()
+                || id.toString().toLowerCase(Locale.ROOT).contains(lowerQuery)
+                || label.toLowerCase(Locale.ROOT).contains(lowerQuery);
+    }
+
+    private FlowLayout buildItemRow(ItemRowData data) {
         FlowLayout row = UIContainers.horizontalFlow(Sizing.fill(100), Sizing.content());
         row.gap(6);
         row.padding(Insets.of(4, 6, 4, 6));
         row.verticalAlignment(VerticalAlignment.CENTER);
         row.cursorStyle(CursorStyle.HAND);
-        row.tooltip(Component.literal(id.toString()));
+        row.tooltip(Component.literal(data.id().toString()));
 
-        row.child(UIComponents.item(new ItemStack(item)));
-        LabelComponent nameLabel = UIComponents.label(Component.literal(name));
+        row.child(UIComponents.item(itemIcon(data.item(), data.potion())));
+        LabelComponent nameLabel = UIComponents.label(Component.literal(data.label()));
         row.child(nameLabel);
         row.child(horizontalSpacer());
 
-        ButtonComponent state = smallButton(Component.literal(""), b -> onItemStateButton(item, id));
+        String key = rowKey(data.id(), data.potion());
+        ButtonComponent state = smallButton(Component.literal(""), b -> onItemStateButton(key));
         row.child(state);
 
         row.mouseDown().subscribe((click, doubled) -> {
-            selectItem(item);
+            selectItem(key);
             return true;
         });
-        row.mouseEnter().subscribe(() -> paintItemRow(id, true));
-        row.mouseLeave().subscribe(() -> paintItemRow(id, false));
+        row.mouseEnter().subscribe(() -> paintItemRow(key, true));
+        row.mouseLeave().subscribe(() -> paintItemRow(key, false));
 
-        itemRows.put(id, new ItemRow(row, nameLabel, state));
-        paintItemRow(id, false);
+        itemRows.put(key, new ItemRow(row, nameLabel, state, data.id(), data.potion(), data.label()));
+        paintItemRow(key, false);
         return row;
     }
 
-    private void paintItemRow(Identifier id, boolean hovered) {
-        ItemRow row = itemRows.get(id);
+    private static ItemStack itemIcon(Item item, Identifier potion) {
+        if (potion == null) return new ItemStack(item);
+        Potion value = BuiltInRegistries.POTION.getValue(potion);
+        if (value == null) return new ItemStack(item);
+        return PotionContents.createItemStack(item, BuiltInRegistries.POTION.wrapAsHolder(value));
+    }
+
+    private static String rowKey(Identifier id, Identifier potion) {
+        return potion == null ? id.toString() : id + "|" + potion;
+    }
+
+    private void paintItemRow(String key, boolean hovered) {
+        ItemRow row = itemRows.get(key);
         if (row == null) return;
-        boolean selected = id.equals(selectedItemId);
-        boolean added = hasItemTarget(id);
+        boolean selected = key.equals(selectedItemKey);
+        boolean added = AutoTradeManager.getInstance().findItemTarget(row.id, row.potion) != null;
 
         Color background;
         if (added) background = hovered ? ROW_ADDED_HOVER : ROW_ADDED;
@@ -412,32 +469,35 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
     }
 
     private void refreshItemRowStates() {
-        for (Identifier id : itemRows.keySet()) paintItemRow(id, false);
+        for (String key : itemRows.keySet()) paintItemRow(key, false);
     }
 
-    private void selectItem(Item item) {
-        Identifier id = BuiltInRegistries.ITEM.getKey(item);
-        if (id.equals(selectedItemId)) return;
-        Identifier previous = selectedItemId;
-        this.selectedItemId = id;
-        this.selectedItemName = item.getName(new ItemStack(item)).getString();
+    private void selectItem(String key) {
+        ItemRow row = itemRows.get(key);
+        if (row == null || key.equals(selectedItemKey)) return;
+        String previous = selectedItemKey;
+        this.selectedItemKey = key;
+        this.selectedItemId = row.id;
+        this.selectedItemName = row.label;
         expandedItemEnchant = null;
         if (previous != null) paintItemRow(previous, false);
-        paintItemRow(id, false);
+        paintItemRow(key, false);
         refreshItemEnchList();
     }
 
-    private void onItemStateButton(Item item, Identifier id) {
-        if (hasItemTarget(id)) {
-            expandedCards.add(cardKeyForItem(id));
+    private void onItemStateButton(String key) {
+        ItemRow row = itemRows.get(key);
+        if (row == null) return;
+        AutoTradeManager manager = AutoTradeManager.getInstance();
+        if (manager.findItemTarget(row.id, row.potion) != null) {
+            expandedCards.add(cardKeyForItem(row.id, row.potion));
             switchTab(TAB_TARGET);
             return;
         }
-        AutoTradeManager manager = AutoTradeManager.getInstance();
-        if (manager.addTarget(id, new ArrayList<>(), DEFAULT_MIN_COUNT, DEFAULT_MAX_PRICE)) {
-            expandedCards.add(cardKeyForItem(id));
+        if (manager.addTarget(row.id, new ArrayList<>(), DEFAULT_MIN_COUNT, DEFAULT_MAX_PRICE, row.potion)) {
+            expandedCards.add(cardKeyForItem(row.id, row.potion));
         }
-        selectItem(item);
+        selectItem(key);
         refreshItemRowStates();
         updateTabLabels();
     }
@@ -779,7 +839,7 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
 
         ItemStack icon = token.isEnchantedBook()
                 ? new ItemStack(Items.ENCHANTED_BOOK)
-                : BuiltInRegistries.ITEM.getOptional(token.id()).map(ItemStack::new).orElse(ItemStack.EMPTY);
+                : itemIcon(BuiltInRegistries.ITEM.getOptional(token.id()).orElse(Items.AIR), token.potion());
         header.child(UIComponents.item(icon));
         header.child(UIComponents.label(Component.literal(cardTitle(token)))
                 .color(token.isEnchantedBook() ? TITLE : TEXT));
@@ -1158,10 +1218,6 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
         return romans[num];
     }
 
-    private boolean hasItemTarget(Identifier id) {
-        return AutoTradeManager.getInstance().findItemTarget(id) != null;
-    }
-
     private boolean hasEnchantOnItem(Identifier itemId, Identifier enchantId) {
         if (itemId == null) return false;
         TargetEntry entry = AutoTradeManager.getInstance().findItemTarget(itemId);
@@ -1181,11 +1237,11 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
                     ? "book:-"
                     : "book:" + entry.enchants().get(0).id();
         }
-        return "item:" + entry.id();
+        return cardKeyForItem(entry.id(), entry.potion());
     }
 
-    private static String cardKeyForItem(Identifier itemId) {
-        return "item:" + itemId;
+    private static String cardKeyForItem(Identifier itemId, Identifier potion) {
+        return potion == null ? "item:" + itemId : "item:" + itemId + "|" + potion;
     }
 
     private String cardTitle(TargetEntry entry) {
@@ -1195,7 +1251,9 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
                     .map(requirement -> enchantName(requirement.id()))
                     .collect(Collectors.joining(" + "));
         }
-        return itemName(entry.id());
+        return entry.potion() == null
+                ? itemName(entry.id())
+                : itemName(entry.id()) + " · " + VillagerTradeData.potionName(entry.potion()).getString();
     }
 
     private String enchantName(Identifier id) {

@@ -24,6 +24,7 @@ import net.minecraft.world.item.trading.MerchantOffers;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -78,12 +79,17 @@ public class AutoTradeManager {
     public SearchSpeed getSearchSpeed() { return searchSpeed; }
 
     public boolean addTarget(Identifier id, List<EnchantRequirement> enchants, int minCount, int maxPrice) {
+        return addTarget(id, enchants, minCount, maxPrice, null);
+    }
+
+    public boolean addTarget(Identifier id, List<EnchantRequirement> enchants, int minCount, int maxPrice,
+                             Identifier potion) {
         if (TradeTargets.isEnchantedBookId(id)) {
             for (EnchantRequirement requirement : enchants) {
                 if (findBookTarget(requirement.id()) != null) return false;
             }
         }
-        var entry = new TargetEntry(id, new ArrayList<>(enchants), minCount, maxPrice);
+        var entry = new TargetEntry(id, new ArrayList<>(enchants), minCount, maxPrice, potion);
         if (targets.contains(entry)) return false;
         targets.add(entry);
         TargetStore.markDirty();
@@ -130,13 +136,21 @@ public class AutoTradeManager {
         targets.clear();
         for (TargetEntry entry : restored) {
             targets.add(new TargetEntry(entry.id(), new ArrayList<>(entry.enchants()),
-                    entry.minCount(), entry.maxPrice()));
+                    entry.minCount(), entry.maxPrice(), entry.potion()));
         }
     }
 
     public TargetEntry findItemTarget(Identifier itemId) {
         for (TargetEntry t : targets) {
             if (!t.isEnchantedBook() && t.id().equals(itemId)) return t;
+        }
+        return null;
+    }
+
+    public TargetEntry findItemTarget(Identifier itemId, Identifier potion) {
+        for (TargetEntry t : targets) {
+            if (t.isEnchantedBook() || !t.id().equals(itemId)) continue;
+            if (Objects.equals(t.potion(), potion)) return t;
         }
         return null;
     }
@@ -156,7 +170,7 @@ public class AutoTradeManager {
             TargetEntry current = targets.get(i);
             if (!sameEntry(current, entry)) continue;
             if (current.minCount() == minCount && current.maxPrice() == maxPrice) return false;
-            targets.set(i, new TargetEntry(current.id(), current.enchants(), minCount, maxPrice));
+            targets.set(i, new TargetEntry(current.id(), current.enchants(), minCount, maxPrice, current.potion()));
             TargetStore.markDirty();
             return true;
         }
@@ -224,6 +238,9 @@ public class AutoTradeManager {
     }
 
     private String impossibilityReason(TargetEntry entry) {
+        if (entry.potion() != null && entry.potion().getPath().startsWith("long_")) {
+            return "村民不会出售长效药水箭";
+        }
         boolean book = entry.isEnchantedBook();
         for (EnchantRequirement req : entry.enchants()) {
             int maxLevel = VillagerTradeData.enchantMaxLevel(req.id());

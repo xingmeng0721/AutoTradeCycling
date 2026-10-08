@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.item.trading.MerchantOffers;
@@ -20,7 +21,12 @@ public final class TradeTargets {
 
     public record EnchantRequirement(Identifier id, int minLevel) {}
 
-    public record TargetEntry(Identifier id, List<EnchantRequirement> enchants, int minCount, int maxPrice) {
+    public record TargetEntry(Identifier id, List<EnchantRequirement> enchants, int minCount, int maxPrice,
+                              Identifier potion) {
+        public TargetEntry(Identifier id, List<EnchantRequirement> enchants, int minCount, int maxPrice) {
+            this(id, enchants, minCount, maxPrice, null);
+        }
+
         public boolean isEnchantedBook() {
             return isEnchantedBookId(id);
         }
@@ -40,6 +46,12 @@ public final class TradeTargets {
         ItemStack result = offer.getResult();
         if (!target.id().equals(BuiltInRegistries.ITEM.getKey(result.getItem()))) return false;
         if (result.getCount() < target.minCount()) return false;
+        if (target.potion() != null) {
+            PotionContents contents = result.get(DataComponents.POTION_CONTENTS);
+            Identifier actual = contents == null ? null
+                    : contents.potion().flatMap(holder -> holder.unwrapKey().map(ResourceKey::identifier)).orElse(null);
+            if (!target.potion().equals(actual)) return false;
+        }
         if (target.enchants().isEmpty()) return true;
 
         ItemEnchantments enchantments = result.getOrDefault(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY);

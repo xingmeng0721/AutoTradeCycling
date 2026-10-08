@@ -38,6 +38,8 @@ public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny, S
                     buf.writeIdentifier(requirement.id());
                     buf.writeVarInt(requirement.minLevel());
                 }
+                buf.writeBoolean(target.potion() != null);
+                if (target.potion() != null) buf.writeIdentifier(target.potion());
             }
             buf.writeBoolean(value.matchAny);
             buf.writeUtf(value.speed.name());
@@ -63,7 +65,8 @@ public record SearchTradesPayload(List<TargetEntry> targets, boolean matchAny, S
                 for (int j = 0; j < enchantCount; j++) {
                     enchants.add(new EnchantRequirement(buf.readIdentifier(), buf.readVarInt()));
                 }
-                targets.add(new TargetEntry(id, enchants, minCount, maxPrice));
+                Identifier potion = buf.readBoolean() ? buf.readIdentifier() : null;
+                targets.add(new TargetEntry(id, enchants, minCount, maxPrice, potion));
             }
             boolean matchAny = buf.readBoolean();
             SearchSpeed speed = SearchSpeed.byName(buf.readUtf(16), SearchSpeed.DEFAULT_SPEED);

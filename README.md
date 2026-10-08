@@ -16,8 +16,8 @@ Minecraft Fabric 客户端模组：自动重掷村民交易，直到刷出指定
 | 依赖 | 版本 |
 | --- | --- |
 | Minecraft | 26.1.2 / 26.2 |
-| Fabric Loader | >= 0.18.0 |
-| Fabric API | 0.155.3+26.1.2 / 0.161.0+26.2 |
+| Fabric Loader | >= 0.19.3 |
+| Fabric API | 0.145.4+26.1.2 / 0.152.1+26.2 |
 | [Trade Cycling](https://modrinth.com/mod/trade-cycling) | 26.1 / 26.2 对应版本 |
 | [Visible Traders](https://modrinth.com/mod/visible-traders) | 26.1（2.4.0）/ 26.2（2.5.1） |
 | [owo-lib](https://modrinth.com/mod/owo-lib) | 0.13.1+26.1 / 0.13.1+26.2 |
@@ -34,9 +34,9 @@ Minecraft Fabric 客户端模组：自动重掷村民交易，直到刷出指定
 多版本工程，各版本为独立子项目，源码在 `versions/<版本>`，按项目路径构建：
 
 ```
-./gradlew build            # 构建全部版本
-./gradlew :26.1:build      # 仅构建 26.1.2
-./gradlew :26.2:build      # 仅构建 26.2
+./gradlew build             # 构建全部版本
+./gradlew :26.1.2:build     # 仅构建 26.1.2
+./gradlew :26.2:build       # 仅构建 26.2
 ```
 
 产物：`versions/<版本>/build/libs/auto-trade-cycling-1.0+<版本>.jar`
