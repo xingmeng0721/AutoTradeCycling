@@ -1,0 +1,102 @@
+final int mcVersion = project.mcVersion
+final boolean unobfuscated = mcVersion >= 26_00_00
+final int targetJavaVersion = unobfuscated ? 25 : 21
+
+apply plugin: 'maven-publish'
+apply plugin: unobfuscated ? 'net.fabricmc.fabric-loom' : 'net.fabricmc.fabric-loom-remap'
+apply plugin: 'com.replaymod.preprocess'
+
+repositories {
+    maven {
+        name = 'Fabric'
+        url = 'https://maven.fabricmc.net/'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'WispForest'
+        url = 'https://maven.wispforest.io/releases/'
+    }
+    maven {
+        name = 'JitPack'
+        url = 'https://jitpack.io'
+        content { includeGroup('com.github.kdl-org') }
+    }
+}
+
+dependencies {
+    def autoImplementation = { Object... args -> unobfuscated ? implementation(*args) : modImplementation(*args) }
+
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    if (!unobfuscated) {
+        mappings loom.officialMojangMappings()
+    }
+    autoImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    autoImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    autoImplementation "maven.modrinth:qpPoAL6m:${project.trade_cycling_version}"
+    autoImplementation "maven.modrinth:AhllI99f:${project.visible_traders_version}"
+    autoImplementation "io.wispforest:owo-lib:${project.owo_version}"
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "auto-trade-cycling" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+group = project.maven_group
+version = "${project.mod_version}+${project.minecraft_version}"
+
+base {
+    archivesName = project.archives_base_name
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_dep", project.minecraft_dependency
+    inputs.property "loader_min_version", project.loader_min_version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_dep": project.minecraft_dependency,
+                "loader_min_version": project.loader_min_version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release.set(targetJavaVersion)
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from(rootProject.file('LICENSE')) {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+    repositories {
+    }
+}
