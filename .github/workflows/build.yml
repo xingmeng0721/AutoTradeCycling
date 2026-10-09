@@ -21,6 +21,14 @@ jobs:
           distribution: 'temurin'
           java-version: 21
 
+      - name: Diagnose network
+        run: |
+          echo "::notice title=proxyenv::$(env | grep -iE 'proxy|_JAVA|JAVA_TOOL_OPTIONS|GRADLE_OPTS' | tr '\n' ';')"
+          echo "::notice title=dns::$(getent hosts services.gradle.org | tr '\n' ';' | head -c 300)"
+          echo "::notice title=gradleorg::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://services.gradle.org/distributions/gradle-9.7.0-bin.zip 2>&1 | head -c 300)"
+          echo "::notice title=maven::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://repo.maven.apache.org/maven2/ 2>&1 | head -c 300)"
+          echo "::notice title=jitpack::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://jitpack.io/ 2>&1 | head -c 300)"
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
