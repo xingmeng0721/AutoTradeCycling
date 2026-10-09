@@ -12,10 +12,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      # runner 上 services.gradle.org 只解析出 IPv6，而运行环境无 IPv6 出口，Java 会先连 IPv6 得到 Connection refused。
-      # 强制 JVM 只用 IPv4（同时覆盖 gradlew 启动 JVM 与 Gradle daemon）。
-      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
 
     steps:
       - uses: actions/checkout@v7
@@ -25,39 +21,22 @@ jobs:
           distribution: 'temurin'
           java-version: 21
 
-      - name: Diagnose network
-        run: |
-          echo "::notice title=proxyenv::$(env | grep -iE 'proxy|_JAVA|JAVA_TOOL_OPTIONS|GRADLE_OPTS' | tr '\n' ';')"
-          echo "::notice title=dns::$(getent hosts services.gradle.org | tr '\n' ';' | head -c 300)"
-          echo "::notice title=gradleorg::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://services.gradle.org/distributions/gradle-9.7.0-bin.zip 2>&1 | head -c 300)"
-          echo "::notice title=maven::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://repo.maven.apache.org/maven2/ 2>&1 | head -c 300)"
-          echo "::notice title=jitpack::$(curl -sS -I -o /dev/null -w '%{http_code} %{remote_ip}' --max-time 15 https://jitpack.io/ 2>&1 | head -c 300)"
-
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          # v6 的增强缓存依赖本地服务；分支构建下该服务不可达（Connection refused），会让 ./gradlew 直接失败，先关闭缓存
-          cache-disabled: true
+          # 允许非主分支（如 1.21.x）也读写 Gradle 缓存；默认只在默认分支可写，分支构建无法复用缓存
+          cache-read-only: false
 
       - name: Build with gradle
         run: |
           chmod +x gradlew
           if [ -z "${{ inputs.target_subproject }}" ]; then
               echo "Building all subprojects"
-              args="buildAndGather"
+              ./gradlew buildAndGather --stacktrace
           else
               args=$(echo "${{ inputs.target_subproject }}" | tr ',' '\n' | sed 's/$/:build/' | paste -sd ' ')
               echo "Building with arguments=$args"
-          fi
-          set +e
-          out=$(./gradlew $args --stacktrace 2>&1)
-          code=$?
-          set -e
-          echo "$out"
-          if [ $code -ne 0 ]; then
-              escaped=$(printf '%s' "$out" | tail -c 1200 | sed ':a;N;$!ba;s/\n/%0A/g')
-              echo "::error title=GradleFailed::$escaped"
-              exit $code
+              ./gradlew $args --stacktrace
           fi
 
       - name: Upload per-version artifacts
