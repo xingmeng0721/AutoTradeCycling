@@ -15,7 +15,7 @@ Minecraft Fabric 客户端模组：自动重掷村民交易，直到刷出指定
 
 | 依赖 | 版本 |
 | --- | --- |
-| Minecraft | 26.1.2 / 26.2 |
+| Minecraft | 26.1 / 26.1.1 / 26.1.2 / 26.2 |
 | Fabric Loader | >= 0.19.3 |
 | Fabric API | 0.145.4+26.1.2 / 0.152.1+26.2 |
 | [Trade Cycling](https://modrinth.com/mod/trade-cycling) | 26.1 / 26.2 对应版本 |
@@ -34,12 +34,21 @@ Minecraft Fabric 客户端模组：自动重掷村民交易，直到刷出指定
 多版本工程，各版本为独立子项目，源码在 `versions/<版本>`，按项目路径构建：
 
 ```
-./gradlew build             # 构建全部版本
-./gradlew :26.1.2:build     # 仅构建 26.1.2
-./gradlew :26.2:build       # 仅构建 26.2
+./gradlew buildAndGather     # 构建全部版本，并把各版本 jar 汇总到 mods/
+./gradlew :26.1.2:build      # 仅构建 26.1 线
+./gradlew :26.2:build        # 仅构建 26.2
 ```
 
-产物：`versions/<版本>/build/libs/auto-trade-cycling-1.0+<版本>.jar`
+同一条版本线共用一个 jar，产物名带适用版本范围：
+
+| 构建目录 | 覆盖的 Minecraft 版本 | 产物 |
+| --- | --- | --- |
+| `versions/26.1.2` | 26.1 / 26.1.1 / 26.1.2 | `auto-trade-cycling-1.0+26.1-26.1.2.jar` |
+| `versions/26.2` | 26.2 | `auto-trade-cycling-1.0+26.2.jar` |
+
+产物位于 `versions/<版本>/build/libs/`，`mods/` 为汇总目录。26.3 暂不构建。
+
+推送到仓库后，GitHub Actions（Dev Builds）会自动构建全部版本，并把 jar 汇总为 `mods` 构件上传，可在对应 run 的 Artifacts 中下载。
 
 ## 协议
 

@@ -52,7 +52,10 @@ loom {
 }
 
 group = project.maven_group
-version = "${project.mod_version}+${project.minecraft_version}"
+def gameVersions = project.game_versions.split(',').collect { it.trim() }
+def gameVersionRange = gameVersions.size() <= 1 ? gameVersions[0]
+        : "${gameVersions[0]}-${gameVersions[gameVersions.size() - 1]}"
+version = "${project.mod_version}+${gameVersionRange}"
 
 base {
     archivesName = project.archives_base_name

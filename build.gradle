@@ -17,3 +17,29 @@ preprocess {
         findProject(node.project).ext.mcVersion = node.mcVersion
     }
 }
+
+tasks.register('buildAndGather') {
+    group = 'build'
+    description = 'Build every Minecraft version and gather all mod jars into the mods/ directory.'
+
+    subprojects {
+        dependsOn project.tasks.named('build').get()
+    }
+
+    doFirst {
+        println 'Gathering builds into mods/'
+        def modsDir = rootProject.file('mods')
+        delete modsDir
+        modsDir.mkdirs()
+        subprojects {
+            copy {
+                from(project.layout.buildDirectory.dir('libs')) {
+                    include '*.jar'
+                    exclude '*-dev.jar', '*-sources.jar', '*-shadow.jar'
+                }
+                into modsDir
+                duplicatesStrategy = DuplicatesStrategy.INCLUDE
+            }
+        }
+    }
+}
