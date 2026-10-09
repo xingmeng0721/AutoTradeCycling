@@ -2,13 +2,6 @@ name: Dev Builds
 
 on:
   push:
-    paths:
-      - "*.gradle"
-      - "gradle.properties"
-      - "settings.json"
-      - "src/**"
-      - "versions/**"
-      - ".github/workflows/**"
   pull_request:
   workflow_dispatch:
 
