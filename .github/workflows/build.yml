@@ -24,19 +24,28 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          # 允许非主分支（如 1.21.x）也读写 Gradle 缓存；默认只在默认分支可写，分支构建无法复用缓存
-          cache-read-only: false
+          # v6 的增强缓存依赖本地服务；分支构建下该服务不可达（Connection refused），会让 ./gradlew 直接失败，先关闭缓存
+          cache-disabled: true
 
       - name: Build with gradle
         run: |
           chmod +x gradlew
           if [ -z "${{ inputs.target_subproject }}" ]; then
               echo "Building all subprojects"
-              ./gradlew buildAndGather --stacktrace
+              args="buildAndGather"
           else
               args=$(echo "${{ inputs.target_subproject }}" | tr ',' '\n' | sed 's/$/:build/' | paste -sd ' ')
               echo "Building with arguments=$args"
-              ./gradlew $args --stacktrace
+          fi
+          set +e
+          out=$(./gradlew $args --stacktrace 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+              escaped=$(printf '%s' "$out" | tail -c 1200 | sed ':a;N;$!ba;s/\n/%0A/g')
+              echo "::error title=GradleFailed::$escaped"
+              exit $code
           fi
 
       - name: Upload per-version artifacts
