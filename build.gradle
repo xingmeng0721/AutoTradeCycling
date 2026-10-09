@@ -1,0 +1,55 @@
+plugins {
+    id 'maven-publish'
+    id 'fabric-loom' version '1.18.2' apply false
+    id 'net.fabricmc.fabric-loom-remap' version '1.18.2' apply false
+    id 'com.replaymod.preprocess' version 'a2223f4'
+}
+
+preprocess {
+    strictExtraMappings = false
+
+    def mc1211  = createNode('1.21.1', 1_21_01, '')
+    def mc1213  = createNode('1.21.3', 1_21_03, '')
+    def mc1214  = createNode('1.21.4', 1_21_04, '')
+    def mc1215  = createNode('1.21.5', 1_21_05, '')
+    def mc1218  = createNode('1.21.8', 1_21_08, '')
+    def mc12110 = createNode('1.21.10', 1_21_10, '')
+    def mc12111 = createNode('1.21.11', 1_21_11, '')
+
+    mc1211.link(mc1213, file('versions/mapping-1.21.1-1.21.3.txt'))
+    mc1213.link(mc1214, file('versions/mapping-1.21.3-1.21.4.txt'))
+    mc1214.link(mc1215, file('versions/mapping-1.21.4-1.21.5.txt'))
+    mc1215.link(mc1218, file('versions/mapping-1.21.5-1.21.8.txt'))
+    mc1218.link(mc12110, file('versions/mapping-1.21.8-1.21.10.txt'))
+    mc12110.link(mc12111, file('versions/mapping-1.21.10-1.21.11.txt'))
+
+    for (final def node in getNodes()) {
+        findProject(node.project).ext.mcVersion = node.mcVersion
+    }
+}
+
+tasks.register('buildAndGather') {
+    group = 'build'
+    description = 'Build every Minecraft version and gather all mod jars into the mods/ directory.'
+
+    subprojects {
+        dependsOn project.tasks.named('build').get()
+    }
+
+    doFirst {
+        println 'Gathering builds into mods/'
+        def modsDir = rootProject.file('mods')
+        delete modsDir
+        modsDir.mkdirs()
+        subprojects {
+            copy {
+                from(project.layout.buildDirectory.dir('libs')) {
+                    include '*.jar'
+                    exclude '*-dev.jar', '*-sources.jar', '*-shadow.jar'
+                }
+                into modsDir
+                duplicatesStrategy = DuplicatesStrategy.INCLUDE
+            }
+        }
+    }
+}

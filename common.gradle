@@ -1,0 +1,99 @@
+final int targetJavaVersion = 21
+
+apply plugin: 'maven-publish'
+apply plugin: 'net.fabricmc.fabric-loom-remap'
+apply plugin: 'com.replaymod.preprocess'
+
+repositories {
+    maven {
+        name = 'Fabric'
+        url = 'https://maven.fabricmc.net/'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'WispForest'
+        url = 'https://maven.wispforest.io/releases/'
+    }
+    maven {
+        name = 'JitPack'
+        url = 'https://jitpack.io'
+        content { includeGroup('com.github.kdl-org') }
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    modImplementation "maven.modrinth:qpPoAL6m:${project.trade_cycling_version}"
+    modImplementation "maven.modrinth:AhllI99f:${project.visible_traders_version}"
+    modImplementation "io.wispforest:owo-lib:${project.owo_version}"
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "auto-trade-cycling" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+group = project.maven_group
+def gameVersions = project.game_versions.split(',').collect { it.trim() }
+def gameVersionRange = gameVersions.size() <= 1 ? gameVersions[0]
+        : "${gameVersions[0]}-${gameVersions[gameVersions.size() - 1]}"
+version = "${project.mod_version}+${gameVersionRange}"
+
+base {
+    archivesName = project.archives_base_name
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_dep", project.minecraft_dependency
+    inputs.property "loader_min_version", project.loader_min_version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_dep": project.minecraft_dependency,
+                "loader_min_version": project.loader_min_version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release.set(targetJavaVersion)
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from(rootProject.file('LICENSE.txt')) {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+        }
+    }
+    repositories {
+    }
+}

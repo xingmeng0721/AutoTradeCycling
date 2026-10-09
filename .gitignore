@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# 收集好的多版本 mod jar
+mods/
+
+# Loom 运行目录
+run/
+.loom-cache/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 系统
+.DS_Store
+Thumbs.db
+
+owo-lib/
+trade-cycling-master/
+VisibleTraders-fabric/
+Carpet-Igny-Addition-master/
+MODULES.md
