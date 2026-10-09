@@ -12,6 +12,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # runner 上 services.gradle.org 只解析出 IPv6，而运行环境无 IPv6 出口，Java 会先连 IPv6 得到 Connection refused。
+      # 强制 JVM 只用 IPv4（同时覆盖 gradlew 启动 JVM 与 Gradle daemon）。
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
 
     steps:
       - uses: actions/checkout@v7
