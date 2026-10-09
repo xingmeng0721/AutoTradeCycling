@@ -41,12 +41,9 @@ dependencies {
 }
 
 loom {
-    splitEnvironmentSourceSets()
-
     mods {
         "auto-trade-cycling" {
             sourceSet sourceSets.main
-            sourceSet sourceSets.client
         }
     }
 }

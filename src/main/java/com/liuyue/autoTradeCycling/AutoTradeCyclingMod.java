@@ -5,9 +5,6 @@ import com.liuyue.autoTradeCycling.server.ServerSearchHandler;
 import com.liuyue.autoTradeCycling.server.TradeableItemsServer;
 import net.fabricmc.api.ModInitializer;
 
-/**
- * 通用入口
- */
 public class AutoTradeCyclingMod implements ModInitializer {
 
     public static final String MOD_ID = "auto-trade-cycling";
