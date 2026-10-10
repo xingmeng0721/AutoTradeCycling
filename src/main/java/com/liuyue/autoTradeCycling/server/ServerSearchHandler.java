@@ -134,9 +134,8 @@ public final class ServerSearchHandler {
             search.attempts++;
             reroll(search);
             MerchantOffers offers = candidateOffers(search.villager);
-            List<Integer> matched = TradeTargets.matchIndices(offers, search.targets);
-            if (TradeTargets.isMatch(matched, search.targets.size(), search.matchAny)) {
-                finish(search, matched, offers);
+            if (search.index.satisfied(offers)) {
+                finish(search, search.index.matchIndices(offers), offers);
                 return true;
             }
             if (deadline != 0L && System.nanoTime() >= deadline) break;
@@ -182,8 +181,7 @@ public final class ServerSearchHandler {
         final VillagerAccessor villagerAccessor;
         final MerchantMenu menu;
         final MerchantContainer container;
-        final List<TargetEntry> targets;
-        final boolean matchAny;
+        final TradeTargets.Index index;
         final SearchSpeed speed;
         int attempts;
         int ticksSinceReport;
@@ -195,8 +193,7 @@ public final class ServerSearchHandler {
             this.villagerAccessor = villagerAccessor;
             this.menu = menu;
             this.container = container;
-            this.targets = targets;
-            this.matchAny = matchAny;
+            this.index = TradeTargets.Index.compile(targets, matchAny);
             this.speed = speed;
         }
     }
