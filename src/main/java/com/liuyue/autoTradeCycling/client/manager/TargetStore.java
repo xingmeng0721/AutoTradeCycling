@@ -30,7 +30,10 @@ public final class TargetStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("auto-trade-cycling.json");
 
+    private static final long MIN_SAVE_INTERVAL_MS = 1000L;
+
     private static boolean dirty = false;
+    private static long lastSaveAt = 0L;
 
     private TargetStore() {
     }
@@ -41,8 +44,11 @@ public final class TargetStore {
 
     public static void flushIfDirty() {
         if (!dirty) return;
+        long now = System.currentTimeMillis();
+        if (now - lastSaveAt < MIN_SAVE_INTERVAL_MS) return;
+        lastSaveAt = now;
+        if (!save()) return;
         dirty = false;
-        save();
     }
 
     public static void load() {
@@ -77,7 +83,7 @@ public final class TargetStore {
         }
     }
 
-    private static void save() {
+    private static boolean save() {
         JsonObject root = new JsonObject();
         root.addProperty("matchMode", AutoTradeManager.getInstance().getMatchMode().name());
         root.addProperty("speed", AutoTradeManager.getInstance().getSearchSpeed().name());
@@ -105,8 +111,10 @@ public final class TargetStore {
         try {
             Files.createDirectories(PATH.getParent());
             Files.writeString(PATH, GSON.toJson(root), StandardCharsets.UTF_8);
+            return true;
         } catch (IOException e) {
             LOGGER.warn("目标存档写入失败", e);
+            return false;
         }
     }
 

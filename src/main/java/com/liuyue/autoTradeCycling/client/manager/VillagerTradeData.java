@@ -25,8 +25,10 @@ import net.minecraft.world.item.trading.MerchantOffer;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -36,6 +38,11 @@ public final class VillagerTradeData {
 
     private static Set<ResourceLocation> itemCache;
     private static List<ResourceLocation> potionCache;
+    private static final Map<ResourceLocation, Boolean> bookCache = new HashMap<>();
+    private static final Map<ResourceLocation, Boolean> tradedEquipmentCache = new HashMap<>();
+    private static final Map<ResourceLocation, Integer> maxLevelCache = new HashMap<>();
+    private static final Map<ResourceLocation, Map<ResourceLocation, Boolean>> applyCache = new HashMap<>();
+    private static Registry<Enchantment> enchantCacheRegistry;
 
     private VillagerTradeData() {
     }
@@ -117,11 +124,31 @@ public final class VillagerTradeData {
     }
 
     public static boolean enchantOnTradedEquipment(ResourceLocation enchantId) {
-        return inTag(enchantId, EnchantmentTags.ON_TRADED_EQUIPMENT);
+        ensureEnchantCache();
+        Boolean cached = tradedEquipmentCache.get(enchantId);
+        if (cached != null) return cached;
+        boolean result = inTag(enchantId, EnchantmentTags.ON_TRADED_EQUIPMENT);
+        tradedEquipmentCache.put(enchantId, result);
+        return result;
     }
 
     public static boolean enchantInBooks(ResourceLocation enchantId) {
-        return inTag(enchantId, EnchantmentTags.TRADEABLE);
+        ensureEnchantCache();
+        Boolean cached = bookCache.get(enchantId);
+        if (cached != null) return cached;
+        boolean result = inTag(enchantId, EnchantmentTags.TRADEABLE);
+        bookCache.put(enchantId, result);
+        return result;
+    }
+
+    private static void ensureEnchantCache() {
+        Registry<Enchantment> registry = enchantmentRegistry();
+        if (registry == enchantCacheRegistry) return;
+        enchantCacheRegistry = registry;
+        bookCache.clear();
+        tradedEquipmentCache.clear();
+        maxLevelCache.clear();
+        applyCache.clear();
     }
 
     private static boolean inTag(ResourceLocation enchantId, TagKey<Enchantment> tag) {
@@ -133,20 +160,33 @@ public final class VillagerTradeData {
     }
 
     public static int enchantMaxLevel(ResourceLocation enchantId) {
+        ensureEnchantCache();
+        Integer cached = maxLevelCache.get(enchantId);
+        if (cached != null) return cached;
         Registry<Enchantment> registry = enchantmentRegistry();
-        if (registry == null) return 0;
-        Enchantment enchantment = registry.getValue(enchantId); //#replace < 1.21.2 ? Enchantment enchantment = registry.get(enchantId);
-        return enchantment == null ? 0 : enchantment.getMaxLevel();
+        Enchantment enchantment = registry == null ? null : registry.getValue(enchantId); //#replace < 1.21.2 ? Enchantment enchantment = registry == null ? null : registry.get(enchantId);
+        int level = enchantment == null ? 0 : enchantment.getMaxLevel();
+        maxLevelCache.put(enchantId, level);
+        return level;
     }
 
     public static boolean canApplyTo(ResourceLocation enchantId, ResourceLocation itemId) {
+        ensureEnchantCache();
+        Map<ResourceLocation, Boolean> perItem = applyCache.computeIfAbsent(enchantId, key -> new HashMap<>());
+        Boolean cached = perItem.get(itemId);
+        if (cached != null) return cached;
         Registry<Enchantment> registry = enchantmentRegistry();
-        if (registry == null) return true;
-        Enchantment enchantment = registry.getValue(enchantId); //#replace < 1.21.2 ? Enchantment enchantment = registry.get(enchantId);
-        if (enchantment == null) return false;
-        return BuiltInRegistries.ITEM.getOptional(itemId)
-                .map(item -> enchantment.canEnchant(new ItemStack(item)))
-                .orElse(false);
+        boolean result;
+        if (registry == null) {
+            result = true;
+        } else {
+            Enchantment enchantment = registry.getValue(enchantId); //#replace < 1.21.2 ? Enchantment enchantment = registry.get(enchantId);
+            result = enchantment != null && BuiltInRegistries.ITEM.getOptional(itemId)
+                    .map(item -> enchantment.canEnchant(new ItemStack(item)))
+                    .orElse(false);
+        }
+        perItem.put(itemId, result);
+        return result;
     }
 
     private static Registry<Enchantment> enchantmentRegistry() {
