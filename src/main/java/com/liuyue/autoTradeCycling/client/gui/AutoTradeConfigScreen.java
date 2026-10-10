@@ -615,7 +615,8 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             TargetEntry existing = AutoTradeManager.getInstance().findBookTarget(option.id());
             if (existing != null) {
                 AutoTradeManager.getInstance().removeEntry(existing);
-                rebuildBookList();
+                if (option.id().equals(expandedBookEnchant)) expandedBookEnchant = null;
+                paintEnchRow(bookRows, option.id(), false);
                 updateTabLabels();
                 return;
             }
@@ -656,8 +657,10 @@ public class AutoTradeConfigScreen extends BaseOwoScreen<FlowLayout> {
             requirements.add(new EnchantRequirement(option.id(), level));
             AutoTradeManager.getInstance().addTarget(BuiltInRegistries.ITEM.getKey(Items.ENCHANTED_BOOK),
                     requirements, DEFAULT_MIN_COUNT, DEFAULT_MAX_PRICE);
+            Identifier previous = expandedBookEnchant;
             expandedBookEnchant = null;
-            rebuildBookList();
+            if (previous != null && !previous.equals(option.id())) paintEnchRow(bookRows, previous, false);
+            paintEnchRow(bookRows, option.id(), false);
         }
         updateTabLabels();
     }

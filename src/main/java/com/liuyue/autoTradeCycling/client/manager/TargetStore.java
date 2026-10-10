@@ -30,19 +30,33 @@ public final class TargetStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("auto-trade-cycling.json");
 
-    private static boolean dirty = false;
+    private static final long MIN_SAVE_INTERVAL_MS = 1000L;
+
+    private static boolean targetsDirty = false;
+    private static boolean itemsDirty = false;
+    private static long lastSaveAt = 0L;
+    private static JsonArray itemsJson;
 
     private TargetStore() {
     }
 
     public static void markDirty() {
-        dirty = true;
+        targetsDirty = true;
+    }
+
+    public static void markItemsDirty() {
+        itemsDirty = true;
+        itemsJson = null;
     }
 
     public static void flushIfDirty() {
-        if (!dirty) return;
-        dirty = false;
-        save();
+        if (!targetsDirty && !itemsDirty) return;
+        long now = System.currentTimeMillis();
+        if (now - lastSaveAt < MIN_SAVE_INTERVAL_MS) return;
+        lastSaveAt = now;
+        if (!save()) return;
+        targetsDirty = false;
+        itemsDirty = false;
     }
 
     public static void load() {
@@ -80,14 +94,15 @@ public final class TargetStore {
             }
             VillagerTradeData.restoreSynced(tradeableItems);
 
-            dirty = false;
+            targetsDirty = false;
+            itemsDirty = false;
             LOGGER.info("已从存档恢复 {} 条目标", restored.size());
         } catch (Exception e) {
             LOGGER.warn("目标存档读取失败，已忽略", e);
         }
     }
 
-    private static void save() {
+    private static boolean save() {
         JsonObject root = new JsonObject();
         root.addProperty("matchMode", AutoTradeManager.getInstance().getMatchMode().name());
         root.addProperty("speed", AutoTradeManager.getInstance().getSearchSpeed().name());
@@ -112,17 +127,21 @@ public final class TargetStore {
         }
         root.add("targets", array);
 
-        JsonArray tradeable = new JsonArray();
-        for (Identifier id : VillagerTradeData.syncedItemsSnapshot()) {
-            tradeable.add(id.toString());
+        if (itemsJson == null) {
+            itemsJson = new JsonArray();
+            for (Identifier id : VillagerTradeData.syncedItemsSnapshot()) {
+                itemsJson.add(id.toString());
+            }
         }
-        root.add("tradeableItems", tradeable);
+        root.add("tradeableItems", itemsJson);
 
         try {
             Files.createDirectories(PATH.getParent());
             Files.writeString(PATH, GSON.toJson(root), StandardCharsets.UTF_8);
+            return true;
         } catch (IOException e) {
             LOGGER.warn("目标存档写入失败", e);
+            return false;
         }
     }
 
