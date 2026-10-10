@@ -134,9 +134,8 @@ public final class ServerSearchHandler {
             search.attempts++;
             reroll(search);
             MerchantOffers offers = combinedOffers(search);
-            List<Integer> matched = TradeTargets.matchIndices(offers, search.targets);
-            if (TradeTargets.isMatch(matched, search.targets.size(), search.matchAny)) {
-                finish(search, matched);
+            if (search.index.satisfied(offers)) {
+                finish(search, search.index.matchIndices(offers));
                 return true;
             }
             if (deadline != 0L && System.nanoTime() >= deadline) break;
@@ -144,8 +143,10 @@ public final class ServerSearchHandler {
         return false;
     }
 
+    /** 复用会话内的同一缓冲，避免每次重掷都分配新的报价列表。 */
     private static MerchantOffers combinedOffers(Search search) {
-        MerchantOffers combined = new MerchantOffers();
+        MerchantOffers combined = search.combined;
+        combined.clear();
         combined.addAll(search.villager.getOffers());
         for (MerchantOffers level : search.rolledLevels) {
             combined.addAll(level);
@@ -190,9 +191,9 @@ public final class ServerSearchHandler {
         final MerchantMenu menu;
         final MerchantContainer container;
         final ServerLevel level;
-        final List<TargetEntry> targets;
-        final boolean matchAny;
+        final TradeTargets.Index index;
         final SearchSpeed speed;
+        final MerchantOffers combined = new MerchantOffers();
         List<MerchantOffers> rolledLevels = List.of();
         int attempts;
         int ticksSinceReport;
@@ -205,8 +206,7 @@ public final class ServerSearchHandler {
             this.menu = menu;
             this.container = container;
             this.level = level;
-            this.targets = targets;
-            this.matchAny = matchAny;
+            this.index = TradeTargets.Index.compile(targets, matchAny);
             this.speed = speed;
         }
     }
