@@ -88,6 +88,8 @@ public final class ServerSearchHandler {
         LOGGER.info("批量搜索开始: 档位 {}，1 级报价 {} 条 ({})，2-5 级由本地生成并与 VT 对齐",
                 payload.speed().label(), visible.size(), describeOffers(visible));
 
+        villager.setTradingPlayer(player);
+
         ACTIVE.put(player.getUUID(), new Search(player, villager, villagerAccessor, menu,
                 menuAccessor.getTradeContainer(), (ServerLevel) villager.level(), targets, payload.matchAny(), payload.speed()));
     }
@@ -133,9 +135,9 @@ public final class ServerSearchHandler {
         for (int i = 0; i < speed.maxAttemptsPerTick(); i++) {
             search.attempts++;
             reroll(search);
-            MerchantOffers offers = combinedOffers(search);
-            if (search.index.satisfied(offers)) {
-                finish(search, search.index.matchIndices(offers));
+            MerchantOffers offers = search.villager.getOffers();
+            if (search.index.satisfied(offers, search.rolledLevels)) {
+                finish(search, search.index.matchIndices(offers, search.rolledLevels));
                 return true;
             }
             if (deadline != 0L && System.nanoTime() >= deadline) break;
@@ -143,23 +145,11 @@ public final class ServerSearchHandler {
         return false;
     }
 
-    /** 复用会话内的同一缓冲，避免每次重掷都分配新的报价列表。 */
-    private static MerchantOffers combinedOffers(Search search) {
-        MerchantOffers combined = search.combined;
-        combined.clear();
-        combined.addAll(search.villager.getOffers());
-        for (MerchantOffers level : search.rolledLevels) {
-            combined.addAll(level);
-        }
-        return combined;
-    }
-
     private static void reroll(Search search) {
         Villager villager = search.villager;
         villager.setOffers(null);
         villager.getOffers();
         search.villagerAccessor.invokeUpdateSpecialPrices(search.player);
-        villager.setTradingPlayer(search.player);
         search.rolledLevels = VisibleTradersServer.generateLockedLevels(villager, search.level);
     }
 
@@ -193,7 +183,6 @@ public final class ServerSearchHandler {
         final ServerLevel level;
         final TradeTargets.Index index;
         final SearchSpeed speed;
-        final MerchantOffers combined = new MerchantOffers();
         List<MerchantOffers> rolledLevels = List.of();
         int attempts;
         int ticksSinceReport;
