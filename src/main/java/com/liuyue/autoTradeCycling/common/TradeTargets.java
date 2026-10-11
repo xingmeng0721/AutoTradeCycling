@@ -4,6 +4,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -12,7 +13,6 @@ import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.item.trading.MerchantOffers;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,7 +45,9 @@ public final class TradeTargets {
     /** 单条报价与单个目标的匹配（冷路径：客户端上报用）。 */
     public static boolean matches(MerchantOffer offer, TargetEntry target) {
         if (offer.isOutOfStock()) return false;
-        return new ParsedOffer(offer, offer.getResult()).matches(target);
+        ItemStack result = offer.getResult();
+        if (!target.id().equals(BuiltInRegistries.ITEM.getKey(result.getItem()))) return false;
+        return new ParsedOffer(offer, result).matches(target);
     }
 
     /** 逐目标收集命中的下标，命中即按目标下标升序返回。 */
@@ -64,26 +66,29 @@ public final class TradeTargets {
     public static final class Index {
 
         private final List<TargetEntry> targets;
-        private final Map<ResourceLocation, int[]> buckets;
+        private final Map<Item, int[]> buckets;
         private final boolean matchAny;
-        private boolean[] hits = new boolean[0];
+        private int[] stamp = new int[0];
+        private int generation;
 
-        private Index(List<TargetEntry> targets, Map<ResourceLocation, int[]> buckets, boolean matchAny) {
+        private Index(List<TargetEntry> targets, Map<Item, int[]> buckets, boolean matchAny) {
             this.targets = targets;
             this.buckets = buckets;
             this.matchAny = matchAny;
         }
 
         public static Index compile(List<TargetEntry> targets, boolean matchAny) {
-            Map<ResourceLocation, List<Integer>> grouped = new HashMap<>();
+            Map<Item, List<Integer>> grouped = new HashMap<>();
             for (int i = 0; i < targets.size(); i++) {
-                grouped.computeIfAbsent(targets.get(i).id(), key -> new ArrayList<>()).add(i);
+                Item item = BuiltInRegistries.ITEM.getOptional(targets.get(i).id()).orElse(null);
+                if (item == null) continue;
+                grouped.computeIfAbsent(item, key -> new ArrayList<>()).add(i);
             }
-            Map<ResourceLocation, int[]> buckets = new HashMap<>(grouped.size());
-            grouped.forEach((id, indices) -> {
+            Map<Item, int[]> buckets = new HashMap<>(grouped.size());
+            grouped.forEach((item, indices) -> {
                 int[] bucket = new int[indices.size()];
                 for (int i = 0; i < bucket.length; i++) bucket[i] = indices.get(i);
-                buckets.put(id, bucket);
+                buckets.put(item, bucket);
             });
             return new Index(List.copyOf(targets), buckets, matchAny);
         }
@@ -94,64 +99,83 @@ public final class TradeTargets {
 
         /** 判定本组报价是否满足匹配模式：ANY 命中一个即返回，ALL 需全部命中。 */
         public boolean satisfied(MerchantOffers offers) {
+            return satisfied(offers, List.of());
+        }
+
+        public boolean satisfied(MerchantOffers primary, List<MerchantOffers> extra) {
             int count = targets.size();
-            if (hits.length < count) hits = new boolean[count];
-            Arrays.fill(hits, 0, count, false);
+            if (stamp.length < count) stamp = new int[count];
+            int gen = ++generation;
             int remaining = count;
 
-            for (MerchantOffer offer : offers) {
-                if (remaining == 0) break;
-                if (offer.isOutOfStock()) continue;
-                ItemStack result = offer.getResult();
-                int[] bucket = buckets.get(BuiltInRegistries.ITEM.getKey(result.getItem()));
-                if (bucket == null) continue;
+            int groups = extra.size() + 1;
+            for (int group = 0; group < groups; group++) {
+                MerchantOffers offers = group == 0 ? primary : extra.get(group - 1);
+                for (MerchantOffer offer : offers) {
+                    if (remaining == 0) break;
+                    if (offer.isOutOfStock()) continue;
+                    ItemStack result = offer.getResult();
+                    int[] bucket = buckets.get(result.getItem());
+                    if (bucket == null) continue;
 
-                ParsedOffer parsed = new ParsedOffer(offer, result);
-                for (int index : bucket) {
-                    if (hits[index]) continue;
-                    if (parsed.matches(targets.get(index))) {
-                        hits[index] = true;
-                        if (matchAny || --remaining == 0) return true;
+                    ParsedOffer parsed = new ParsedOffer(offer, result);
+                    for (int index : bucket) {
+                        if (stamp[index] == gen) continue;
+                        if (parsed.matches(targets.get(index))) {
+                            stamp[index] = gen;
+                            if (matchAny || --remaining == 0) return true;
+                        }
                     }
                 }
+                if (remaining == 0) break;
             }
             return false;
         }
 
         /** 收集全部命中目标的下标，命中后按目标下标升序返回。 */
         public List<Integer> matchIndices(MerchantOffers offers) {
-            boolean[] hit = new boolean[targets.size()];
-            int remaining = targets.size();
+            return matchIndices(offers, List.of());
+        }
 
-            for (MerchantOffer offer : offers) {
-                if (remaining == 0) break;
-                if (offer.isOutOfStock()) continue;
-                ItemStack result = offer.getResult();
-                int[] bucket = buckets.get(BuiltInRegistries.ITEM.getKey(result.getItem()));
-                if (bucket == null) continue;
+        public List<Integer> matchIndices(MerchantOffers primary, List<MerchantOffers> extra) {
+            int count = targets.size();
+            if (stamp.length < count) stamp = new int[count];
+            int gen = ++generation;
+            int remaining = count;
 
-                ParsedOffer parsed = new ParsedOffer(offer, result);
-                for (int index : bucket) {
-                    if (hit[index]) continue;
-                    if (parsed.matches(targets.get(index))) {
-                        hit[index] = true;
-                        remaining--;
+            int groups = extra.size() + 1;
+            for (int group = 0; group < groups; group++) {
+                MerchantOffers offers = group == 0 ? primary : extra.get(group - 1);
+                for (MerchantOffer offer : offers) {
+                    if (remaining == 0) break;
+                    if (offer.isOutOfStock()) continue;
+                    ItemStack result = offer.getResult();
+                    int[] bucket = buckets.get(result.getItem());
+                    if (bucket == null) continue;
+
+                    ParsedOffer parsed = new ParsedOffer(offer, result);
+                    for (int index : bucket) {
+                        if (stamp[index] == gen) continue;
+                        if (parsed.matches(targets.get(index))) {
+                            stamp[index] = gen;
+                            remaining--;
+                        }
                     }
                 }
+                if (remaining == 0) break;
             }
 
-            List<Integer> matched = new ArrayList<>(targets.size() - remaining);
-            for (int i = 0; i < hit.length; i++) {
-                if (hit[i]) matched.add(i);
+            List<Integer> matched = new ArrayList<>(count - remaining);
+            for (int i = 0; i < count; i++) {
+                if (stamp[i] == gen) matched.add(i);
             }
             return matched;
         }
     }
 
-    /** 报价解析结果：物品 ID、价格、数量与组件在一条报价上只算一次。 */
+    /** 报价解析结果：价格、数量与组件在一条报价上只算一次。 */
     private static final class ParsedOffer {
 
-        private final ResourceLocation itemId;
         private final int price;
         private final int count;
         private final ItemStack result;
@@ -162,14 +186,12 @@ public final class TradeTargets {
 
         ParsedOffer(MerchantOffer offer, ItemStack result) {
             this.result = result;
-            this.itemId = BuiltInRegistries.ITEM.getKey(result.getItem());
             this.price = offer.getBaseCostA().getCount();
             this.count = result.getCount();
         }
 
         boolean matches(TargetEntry target) {
             if (price > target.maxPrice()) return false;
-            if (!target.id().equals(itemId)) return false;
             if (count < target.minCount()) return false;
             if (target.potion() != null && !target.potion().equals(potionId())) return false;
             if (target.enchants().isEmpty()) return true;

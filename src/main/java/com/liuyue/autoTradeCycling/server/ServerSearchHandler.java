@@ -88,6 +88,8 @@ public final class ServerSearchHandler {
         LOGGER.info("批量搜索开始: 档位 {}，候选人报价 {} 条 ({})",
                 payload.speed().label(), visible.size(), describeOffers(visible));
 
+        villager.setTradingPlayer(player);
+
         ACTIVE.put(player.getUUID(), new Search(player, villager, villagerAccessor, menu,
                 menuAccessor.getTradeContainer(), targets, payload.matchAny(), payload.speed()));
     }
@@ -152,7 +154,6 @@ public final class ServerSearchHandler {
         villager.setOffers(null);
         villager.getOffers();
         search.villagerAccessor.invokeUpdateSpecialPrices(search.player);
-        villager.setTradingPlayer(search.player);
         VisibleTradersServer.regenerateTrades(villager);
     }
 
