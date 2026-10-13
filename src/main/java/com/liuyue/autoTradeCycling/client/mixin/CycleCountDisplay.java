@@ -32,18 +32,15 @@ public class CycleCountDisplay {
         return original.call(instance, text);
     }
 
-    @WrapOperation(method = "renderLabels", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)V"))
-    private void renderCycleCount(GuiGraphics instance, Font font, Component str, int x, int y, int color, boolean dropShadow, Operation<Void> original) {
+    @WrapOperation(method = "renderLabels", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)V")) //#replace < 1.21.8 ?     @WrapOperation(method = "renderLabels", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)I"))
+    private void renderCycleCount(GuiGraphics instance, Font font, Component str, int x, int y, int color, boolean dropShadow, Operation<Void> original) { //#replace < 1.21.8 ?     private int renderCycleCount(GuiGraphics instance, Font font, Component str, int x, int y, int color, boolean dropShadow, Operation<Integer> original) {
+        original.call(instance, font, decorate(str), x, y, color, dropShadow); //#replace < 1.21.8 ?         return original.call(instance, font, decorate(str), x, y, color, dropShadow);
+    }
+
+    private static Component decorate(Component str) {
         AutoTradeManager mgr = AutoTradeManager.getInstance();
-        if (!mgr.isActive() || !str.getString().equals(TRADES_LABEL.getString())) {
-            original.call(instance, font, str, x, y, color, dropShadow);
-            return;
-        }
+        if (!mgr.isActive() || !str.getString().equals(TRADES_LABEL.getString())) return str;
         int count = mgr.getCycleCount();
-        if (count > 0) {
-            original.call(instance, font, Component.literal(str.getString() + " (" + count + ")"), x, y, color, dropShadow);
-            return;
-        }
-        original.call(instance, font, str, x, y, color, dropShadow);
+        return count > 0 ? Component.literal(str.getString() + " (" + count + ")") : str;
     }
 }
