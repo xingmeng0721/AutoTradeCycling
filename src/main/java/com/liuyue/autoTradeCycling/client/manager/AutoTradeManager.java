@@ -21,6 +21,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.item.trading.MerchantOffers;
+import net.ramixin.visibletraders.ducks.ClientMerchantMenuDuck;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,7 @@ public class AutoTradeManager {
     public enum MatchMode { ALL, ANY }
 
     private static final int SEARCH_TIMEOUT_TICKS = 600;
+    private static final int PREVIEW_WAIT_TICKS = 40;
 
     private State state = State.IDLE;
     private MatchMode matchMode = MatchMode.ALL;
@@ -47,6 +49,8 @@ public class AutoTradeManager {
     private int tickCounter = 0;
     private int cycleCount = 0;
     private boolean offersUpdated = false;
+    private boolean previewUpdated = false;
+    private boolean previewVerified = false;
     private long lastSoundTime = 0;
     private int soundCount = 0;
 
@@ -55,11 +59,18 @@ public class AutoTradeManager {
         tryTransitionToChecking();
     }
 
+    public void onPreviewUpdated() {
+        this.previewUpdated = true;
+        tryTransitionToChecking();
+    }
+
     private void tryTransitionToChecking() {
-        if (state == State.CYCLING && offersUpdated) {
+        if (state == State.CYCLING && offersUpdated && previewUpdated) {
             state = State.CHECKING;
             tickCounter = 0;
             offersUpdated = false;
+            previewUpdated = false;
+            previewVerified = true;
         }
     }
 
@@ -304,8 +315,7 @@ public class AutoTradeManager {
                 ClientPlayNetworking.send(new SearchTradesPayload(searchTargets,
                         matchMode == MatchMode.ANY, searchSpeed));
             } else {
-                state = State.CYCLING;
-                doCycling();
+                beginCycle();
             }
         }
     }
@@ -362,11 +372,12 @@ public class AutoTradeManager {
             finish(client, "§c交易界面已关闭，自动刷新停止。");
             return;
         }
-        if (tickCounter > 20) {
-            chat(client, "§7重试刷新...");
-            doCycling();
-            offersUpdated = false;
+        if (tickCounter > PREVIEW_WAIT_TICKS) {
+            state = State.CHECKING;
             tickCounter = 0;
+            offersUpdated = false;
+            previewUpdated = false;
+            previewVerified = false;
         }
     }
 
@@ -374,7 +385,8 @@ public class AutoTradeManager {
         MerchantMenu menu = getMerchantMenu(client);
         if (menu == null) { finish(client, "§c交易界面已关闭。"); return; }
 
-        List<Integer> matched = TradeTargets.matchIndices(menu.getOffers(), targets);
+        MerchantOffers offers = availableOffers(menu, previewVerified);
+        List<Integer> matched = TradeTargets.matchIndices(offers, targets);
         if (TradeTargets.isMatch(matched, targets.size(), matchMode == MatchMode.ANY)) {
             chat(client, "§a" + modePrefix() + "目标已出现！共刷新 " + cycleCount + " 次");
             reportMatches(client, matched, targets);
@@ -385,9 +397,7 @@ public class AutoTradeManager {
         }
 
         cycleCount++;
-        doCycling();
-        offersUpdated = false;
-        state = State.CYCLING;
+        beginCycle();
     }
 
     private String modePrefix() {
@@ -400,7 +410,7 @@ public class AutoTradeManager {
 
         MerchantMenuAccessor accessor = (MerchantMenuAccessor) menu;
         MerchantOffers currentOffers = accessor.getTrader().getOffers();
-        MerchantOffers allOffers = menu.getOffers();
+        MerchantOffers allOffers = availableOffers(menu, previewVerified);
         for (int index : matchedIndices) {
             if (index < 0 || index >= pool.size()) continue;
             TargetEntry target = pool.get(index);
@@ -431,6 +441,22 @@ public class AutoTradeManager {
             if (TradeTargets.matches(offer, target)) result.add(offer);
         }
         return result;
+    }
+
+    private void beginCycle() {
+        state = State.CYCLING;
+        offersUpdated = false;
+        previewUpdated = false;
+        previewVerified = false;
+        tickCounter = 0;
+        doCycling();
+    }
+
+    private MerchantOffers availableOffers(MerchantMenu menu, boolean allowCombined) {
+        if (allowCombined && !ClientPlayNetworking.canSend(SearchTradesPayload.TYPE)) {
+            ClientMerchantMenuDuck.of(menu).visibleTraders$enableCombinedOffers();
+        }
+        return menu.getOffers();
     }
 
     private void doCycling() {
