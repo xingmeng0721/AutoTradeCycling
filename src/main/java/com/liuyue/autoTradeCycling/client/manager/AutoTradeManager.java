@@ -40,7 +40,6 @@ public class AutoTradeManager {
     public enum MatchMode { ALL, ANY }
 
     private static final int SEARCH_TIMEOUT_TICKS = 600;
-    private static final int REOPEN_DELAY_TICKS = 5;
     private static final int REOPEN_RETRY_TICKS = 40;
     private static final int REOPEN_TIMEOUT_TICKS = 200;
 
@@ -52,6 +51,7 @@ public class AutoTradeManager {
     private int tickCounter = 0;
     private int cycleCount = 0;
     private boolean offersUpdated = false;
+    private boolean reopening = false;
     private long lastSoundTime = 0;
     private int soundCount = 0;
 
@@ -229,6 +229,8 @@ public class AutoTradeManager {
         this.state = State.WAITING_FOR_SCREEN;
         this.tickCounter = 0;
         this.cycleCount = 0;
+        this.reopening = false;
+        this.offersUpdated = false;
     }
 
     private void excludeImpossibleTargets() {
@@ -264,6 +266,8 @@ public class AutoTradeManager {
         boolean wasActive = isActive();
         this.state = State.IDLE;
         this.cycleCount = 0;
+        this.reopening = false;
+        this.offersUpdated = false;
         if (wasActive) chat(Minecraft.getInstance(), "§c已停止自动刷新。");
     }
     public boolean isActive() { return state != State.IDLE && state != State.DONE; }
@@ -364,15 +368,23 @@ public class AutoTradeManager {
     }
 
     private void tickCycling(Minecraft client) {
+        boolean screenOpen = getMerchantMenu(client) != null;
+        if (screenOpen) reopening = false;
+        if (!screenOpen && !reopening) {
+            finish(client, "§c交易界面已关闭，自动刷新停止。");
+            return;
+        }
         if (tickCounter > REOPEN_TIMEOUT_TICKS) {
-            finish(client, "§c无法刷新交易预览，已停止自动刷新。请确认村民仍在附近且未走远。");
+            if (screenOpen) {
+                state = State.CHECKING;
+                tickCounter = 0;
+                offersUpdated = false;
+            } else {
+                finish(client, "§c无法自动重开交易界面，已停止自动刷新。请确认村民仍在附近且未走远。");
+            }
             return;
         }
-        if (tickCounter == REOPEN_DELAY_TICKS) {
-            reopenTrading(client);
-            return;
-        }
-        if (tickCounter > REOPEN_DELAY_TICKS && tickCounter % REOPEN_RETRY_TICKS == 0) {
+        if (tickCounter > 0 && tickCounter % REOPEN_RETRY_TICKS == 0) {
             chat(client, "§7重试刷新...");
             beginCycle(client);
         }
@@ -401,12 +413,14 @@ public class AutoTradeManager {
         offersUpdated = false;
         tickCounter = 0;
         doCycling();
+        reopenTrading(client);
     }
 
     private void reopenTrading(Minecraft client) {
         if (client.player == null || client.level == null || client.getConnection() == null) return;
         Entity villager = nearestVillager(client);
         if (villager == null) return;
+        reopening = true;
         client.player.closeContainer();
         client.getConnection().send(ServerboundInteractPacket.createInteractionPacket(
                 villager, false, InteractionHand.MAIN_HAND));
