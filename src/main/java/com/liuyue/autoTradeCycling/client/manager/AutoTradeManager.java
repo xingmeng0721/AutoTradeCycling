@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -40,8 +41,8 @@ public class AutoTradeManager {
     public enum MatchMode { ALL, ANY }
 
     private static final int SEARCH_TIMEOUT_TICKS = 600;
-    private static final int REOPEN_RETRY_TICKS = 40;
-    private static final int REOPEN_TIMEOUT_TICKS = 200;
+    private static final int REOPEN_WAIT_TICKS = 10;
+    private static final int REOPEN_MAX_FAILURES = 5;
 
     private State state = State.IDLE;
     private MatchMode matchMode = MatchMode.ALL;
@@ -51,11 +52,18 @@ public class AutoTradeManager {
     private int tickCounter = 0;
     private int cycleCount = 0;
     private boolean offersUpdated = false;
-    private boolean reopening = false;
+    private int pendingReopenId = -1;
+    private int reopenFailures = 0;
+    private Entity tradingVillager = null;
     private long lastSoundTime = 0;
     private int soundCount = 0;
 
-    public void onOffersUpdated(Minecraft client) {
+    public void onOffersUpdated(Minecraft client, int containerId) {
+        if (state == State.CYCLING) {
+            if (containerId == pendingReopenId) return;
+            pendingReopenId = -1;
+            reopenFailures = 0;
+        }
         this.offersUpdated = true;
         if (client.screen instanceof MerchantScreen) tryTransitionToChecking();
     }
@@ -229,7 +237,9 @@ public class AutoTradeManager {
         this.state = State.WAITING_FOR_SCREEN;
         this.tickCounter = 0;
         this.cycleCount = 0;
-        this.reopening = false;
+        this.pendingReopenId = -1;
+        this.reopenFailures = 0;
+        this.tradingVillager = null;
         this.offersUpdated = false;
     }
 
@@ -266,7 +276,9 @@ public class AutoTradeManager {
         boolean wasActive = isActive();
         this.state = State.IDLE;
         this.cycleCount = 0;
-        this.reopening = false;
+        this.pendingReopenId = -1;
+        this.reopenFailures = 0;
+        this.tradingVillager = null;
         this.offersUpdated = false;
         if (wasActive) chat(Minecraft.getInstance(), "§c已停止自动刷新。");
     }
@@ -368,26 +380,16 @@ public class AutoTradeManager {
     }
 
     private void tickCycling(Minecraft client) {
-        boolean screenOpen = getMerchantMenu(client) != null;
-        if (screenOpen) reopening = false;
-        if (!screenOpen && !reopening) {
+        if (getMerchantMenu(client) == null) {
             finish(client, "§c交易界面已关闭，自动刷新停止。");
             return;
         }
-        if (tickCounter > REOPEN_TIMEOUT_TICKS) {
-            if (screenOpen) {
-                state = State.CHECKING;
-                tickCounter = 0;
-                offersUpdated = false;
-            } else {
-                finish(client, "§c无法自动重开交易界面，已停止自动刷新。请确认村民仍在附近且未走远。");
-            }
+        if (tickCounter <= REOPEN_WAIT_TICKS) return;
+        if (++reopenFailures >= REOPEN_MAX_FAILURES) {
+            failReopen(client);
             return;
         }
-        if (tickCounter > 0 && tickCounter % REOPEN_RETRY_TICKS == 0) {
-            chat(client, "§7重试刷新...");
-            beginCycle(client);
-        }
+        beginCycle(client);
     }
 
     private void tickChecking(Minecraft client) {
@@ -417,18 +419,34 @@ public class AutoTradeManager {
     }
 
     private void reopenTrading(Minecraft client) {
-        if (client.player == null || client.level == null || client.getConnection() == null) return;
-        Entity villager = nearestVillager(client);
-        if (villager == null) return;
-        reopening = true;
-        client.player.closeContainer();
+        if (client.player == null || client.getConnection() == null) return;
+        MerchantMenu menu = getMerchantMenu(client);
+        Entity villager = resolveVillager(client);
+        if (menu == null || villager == null) return;
+        pendingReopenId = menu.containerId;
+        client.getConnection().send(new ServerboundContainerClosePacket(menu.containerId));
         client.getConnection().send(ServerboundInteractPacket.createInteractionPacket(
                 villager, false, InteractionHand.MAIN_HAND));
     }
 
+    private void failReopen(Minecraft client) {
+        if (client.player != null) client.player.closeContainer();
+        finish(client, "§e无法刷新多级交易预览，请靠近村民（3 格内）后重试。");
+    }
+
+    private Entity resolveVillager(Minecraft client) {
+        if (tradingVillager != null && tradingVillager.isAlive()
+                && tradingVillager.distanceToSqr(client.player) <= 64.0) {
+            return tradingVillager;
+        }
+        tradingVillager = nearestVillager(client);
+        return tradingVillager;
+    }
+
     private Entity nearestVillager(Minecraft client) {
+        if (client.player == null || client.level == null) return null;
         Entity nearest = null;
-        double nearestDist = 64.0;
+        double nearestDist = 9.0;
         for (Entity entity : client.level.entitiesForRendering()) {
             if (!(entity instanceof Villager villager) || !villager.isAlive() || villager.isBaby()) continue;
             double dist = entity.distanceToSqr(client.player);

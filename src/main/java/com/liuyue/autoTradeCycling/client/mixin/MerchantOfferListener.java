@@ -14,6 +14,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class MerchantOfferListener {
     @Inject(method = "handleMerchantOffers", at = @At("TAIL"))
     private void onMerchantOffers(ClientboundMerchantOffersPacket packet, CallbackInfo ci) {
-        AutoTradeManager.getInstance().onOffersUpdated(Minecraft.getInstance());
+        AutoTradeManager.getInstance().onOffersUpdated(Minecraft.getInstance(), packet.getContainerId());
     }
 }
