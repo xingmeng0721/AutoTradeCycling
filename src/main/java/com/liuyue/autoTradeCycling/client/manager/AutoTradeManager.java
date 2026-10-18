@@ -12,8 +12,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.MerchantScreen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundInteractPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
@@ -36,6 +40,9 @@ public class AutoTradeManager {
     public enum MatchMode { ALL, ANY }
 
     private static final int SEARCH_TIMEOUT_TICKS = 600;
+    private static final int REOPEN_DELAY_TICKS = 5;
+    private static final int REOPEN_RETRY_TICKS = 40;
+    private static final int REOPEN_TIMEOUT_TICKS = 200;
 
     private State state = State.IDLE;
     private MatchMode matchMode = MatchMode.ALL;
@@ -50,7 +57,7 @@ public class AutoTradeManager {
 
     public void onOffersUpdated(Minecraft client) {
         this.offersUpdated = true;
-        tryTransitionToChecking();
+        if (client.screen instanceof MerchantScreen) tryTransitionToChecking();
     }
 
     private void tryTransitionToChecking() {
@@ -303,8 +310,7 @@ public class AutoTradeManager {
                     ClientPlayNetworking.send(new SearchTradesPayload(searchTargets,
                             matchMode == MatchMode.ANY, searchSpeed));
                 } else {
-                    state = State.CYCLING;
-                    doCycling();
+                    beginCycle(client);
                 }
             }
         }
@@ -358,15 +364,17 @@ public class AutoTradeManager {
     }
 
     private void tickCycling(Minecraft client) {
-        if (!(client.screen instanceof MerchantScreen)) {
-            finish(client, "§c交易界面已关闭，自动刷新停止。");
+        if (tickCounter > REOPEN_TIMEOUT_TICKS) {
+            finish(client, "§c无法刷新交易预览，已停止自动刷新。请确认村民仍在附近且未走远。");
             return;
         }
-        if (tickCounter > 20) {
+        if (tickCounter == REOPEN_DELAY_TICKS) {
+            reopenTrading(client);
+            return;
+        }
+        if (tickCounter > REOPEN_DELAY_TICKS && tickCounter % REOPEN_RETRY_TICKS == 0) {
             chat(client, "§7重试刷新...");
-            doCycling();
-            offersUpdated = false;
-            tickCounter = 0;
+            beginCycle(client);
         }
     }
 
@@ -385,9 +393,37 @@ public class AutoTradeManager {
         }
 
         cycleCount++;
-        doCycling();
-        offersUpdated = false;
+        beginCycle(client);
+    }
+
+    private void beginCycle(Minecraft client) {
         state = State.CYCLING;
+        offersUpdated = false;
+        tickCounter = 0;
+        doCycling();
+    }
+
+    private void reopenTrading(Minecraft client) {
+        if (client.player == null || client.level == null || client.getConnection() == null) return;
+        Entity villager = nearestVillager(client);
+        if (villager == null) return;
+        client.player.closeContainer();
+        client.getConnection().send(ServerboundInteractPacket.createInteractionPacket(
+                villager, false, InteractionHand.MAIN_HAND));
+    }
+
+    private Entity nearestVillager(Minecraft client) {
+        Entity nearest = null;
+        double nearestDist = 64.0;
+        for (Entity entity : client.level.entitiesForRendering()) {
+            if (!(entity instanceof Villager villager) || !villager.isAlive() || villager.isBaby()) continue;
+            double dist = entity.distanceToSqr(client.player);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = entity;
+            }
+        }
+        return nearest;
     }
 
     private String modePrefix() {
